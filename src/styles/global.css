@@ -1,0 +1,598 @@
+/* ========================= */
+/* LIGHT MODE (DEFAULT) */
+/* ========================= */
+
+:root {
+  --primary-dark: #1a6bc4;
+  --orange: #f59e0b;
+  --bg: #f4f7fb;
+  --bg2: #ffffff;
+  --bg3: #e9eef5;
+
+  --panel: #ffffff;
+  --panel2: #f3f6fb;
+
+  --border: #d8e2f0;
+  --border2: #b7cae6;
+
+  --blue: #2d8bff;
+  --blue2: #1a5eb8;
+
+  --teal: #00c9a7;
+  --teal2: #00956e;
+
+  --amber: #f5a623;
+  --amber2: #c47b00;
+
+  --red: #ff4d6d;
+  --green: #18b76a;
+  --purple: #8b5cf6;
+
+  --text: #122033;
+  --text2: #4b6483;
+  --text3: #7d94af;
+
+  --gold: #f5d060;
+
+  --shadow: 0 8px 32px rgba(0,0,0,.08);
+}
+
+/* ========================= */
+/* DARK MODE */
+/* ========================= */
+
+body.dark {
+  --bg: #060d1a;
+  --bg2: #0b1628;
+  --bg3: #101e35;
+
+  --panel: #0f1d30;
+  --panel2: #152238;
+
+  --border: #1e3555;
+  --border2: #264573;
+
+  --blue: #2d8bff;
+  --blue2: #1a5eb8;
+
+  --teal: #00c9a7;
+  --teal2: #00956e;
+
+  --amber: #f5a623;
+  --amber2: #c47b00;
+
+  --red: #ff4d6d;
+  --green: #3cd68a;
+  --purple: #8b5cf6;
+
+  --text: #e8f0fe;
+  --text2: #8ba8cc;
+  --text3: #4a6a8a;
+
+  --gold: #f5d060;
+
+  --shadow: 0 8px 32px rgba(0,0,0,.5);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Outfit', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ───────────────────────────── */
+/* APP LAYOUT */
+/* ───────────────────────────── */
+
+.app {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 56px 1fr;
+  min-height: 100vh;
+}
+
+/* ───────────────────────────── */
+/* TOPBAR */
+/* ───────────────────────────── */
+.theme-toggle {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all .2s ease;
+}
+
+.theme-toggle:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+  transform: translateY(-1px);
+}
+.topbar {
+  grid-column: 1/-1;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 16px;
+  z-index: 100;
+  position: sticky;
+  top: 0;
+}
+
+.topbar-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'DM Serif Display', serif;
+  font-size: 1.25rem;
+  color: var(--text);
+}
+
+.logo-drop {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--blue), var(--teal));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+.topbar-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.topbar-pill {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 14px;
+  font-size: .75rem;
+  color: var(--text2);
+  cursor: pointer;
+  transition: all .2s;
+}
+
+.topbar-pill.active,
+.topbar-pill:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.badge-live {
+  background: #ff4d6d22;
+  border: 1px solid var(--red);
+  color: var(--red);
+  border-radius: 12px;
+  padding: 3px 10px;
+  font-size: .7rem;
+  font-family: 'DM Mono', monospace;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: .5;
+  }
+}
+
+/* ───────────────────────────── */
+/* MAIN CONTENT */
+/* ───────────────────────────── */
+
+.main {
+  width: 100%;
+  padding: 24px;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+/* ───────────────────────────── */
+/* PAGE */
+/* ───────────────────────────── */
+
+.page {
+  display: block;
+}
+
+.page.active {
+  display: block;
+}
+
+.page-header {
+  margin-bottom: 24px;
+}
+
+.page-title {
+  font-family: 'DM Serif Display', serif;
+  font-size: 1.8rem;
+  color: var(--text);
+}
+
+.page-sub {
+  color: var(--text2);
+  font-size: .875rem;
+  margin-top: 4px;
+}
+
+/* ───────────────────────────── */
+/* STAT CARDS */
+/* ───────────────────────────── */
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.stat-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  position: relative;
+  overflow: hidden;
+  transition: transform .2s, border-color .2s;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border2);
+}
+
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+}
+
+.stat-card.blue::before {
+  background: var(--blue);
+}
+
+.stat-card.teal::before {
+  background: var(--teal);
+}
+
+.stat-card.amber::before {
+  background: var(--amber);
+}
+
+.stat-card.red::before {
+  background: var(--red);
+}
+
+.stat-label {
+  font-size: .7rem;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 600;
+}
+
+.stat-val {
+  font-size: 1.7rem;
+  font-weight: 700;
+  font-family: 'DM Mono', monospace;
+  margin: 6px 0 2px;
+}
+
+.stat-unit {
+  font-size: .7rem;
+  color: var(--text3);
+}
+
+.stat-trend {
+  font-size: .75rem;
+  margin-top: 6px;
+}
+
+.trend-up {
+  color: var(--green);
+}
+
+.trend-down {
+  color: var(--red);
+}
+
+/* ───────────────────────────── */
+/* CHARTS */
+/* ───────────────────────────── */
+
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.chart-wide {
+  grid-column: 1/-1;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.card-title {
+  font-weight: 600;
+  font-size: .875rem;
+}
+
+.card-sub {
+  font-size: .7rem;
+  color: var(--text3);
+  margin-top: 2px;
+}
+
+canvas {
+  width: 100% !important;
+  max-height: 220px;
+}
+
+/* ───────────────────────────── */
+/* TABLES */
+/* ───────────────────────────── */
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: .72rem;
+  color: var(--text3);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-table td {
+  padding: 11px 14px;
+  font-size: .8rem;
+  border-bottom: 1px solid #1e355522;
+  color: var(--text2);
+}
+
+.data-table tr:hover td {
+  background: var(--bg3);
+  color: var(--text);
+}
+
+/* ───────────────────────────── */
+/* CHIPS */
+/* ───────────────────────────── */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: .68rem;
+  font-weight: 600;
+}
+
+.chip.deficit {
+  background: #ff4d6d22;
+  color: var(--red);
+}
+
+.chip.ok {
+  background: #3cd68a22;
+  color: var(--green);
+}
+
+.chip.warn {
+  background: #f5a62322;
+  color: var(--amber);
+}
+
+.chip.info {
+  background: #2d8bff22;
+  color: var(--blue);
+}
+
+/* ───────────────────────────── */
+/* ALERTS */
+/* ───────────────────────────── */
+
+.alerts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.alert-item {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  transition: all .2s;
+}
+
+.alert-item:hover {
+  border-color: var(--border2);
+  transform: translateX(3px);
+}
+
+/* ───────────────────────────── */
+/* TABS */
+/* ───────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  background: var(--panel2);
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.tab {
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: .78rem;
+  cursor: pointer;
+  color: var(--text2);
+  transition: all .2s;
+}
+
+.tab.active {
+  background: var(--blue2);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ───────────────────────────── */
+/* INPUTS */
+/* ───────────────────────────── */
+
+.input-group {
+  margin-bottom: 16px;
+}
+
+.input-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text2);
+  margin-bottom: 6px;
+}
+
+input[type=range] {
+  width: 100%;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+/* ───────────────────────────── */
+/* ANIMATIONS */
+/* ───────────────────────────── */
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page.active .card,
+.page.active .stat-card,
+.page.active .alert-item {
+  animation: fadeInUp .35s both;
+}
+
+/* ───────────────────────────── */
+/* FOOTER */
+/* ───────────────────────────── */
+
+.page-footer {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: .72rem;
+  color: var(--text3);
+}
+
+/* styles/global.css - ajoutez à la fin du fichier */
+
+/* ONEPO Widget - Styles de base pour s'assurer qu'il est visible */
+.onepo-fab {
+  position: fixed !important;
+  bottom: 24px !important;
+  right: 24px !important;
+  width: 56px !important;
+  height: 56px !important;
+  border-radius: 18px !important;
+  border: none !important;
+  cursor: pointer !important;
+  z-index: 9999 !important;
+  background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
+  color: white !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.4) !important;
+}
+
+.onepo-widget {
+  position: fixed !important;
+  bottom: 24px !important;
+  right: 24px !important;
+  width: 420px !important;
+  max-width: calc(100vw - 48px) !important;
+  background: #ffffff !important;
+  border-radius: 24px !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
+  z-index: 10000 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  transform: translateY(20px) !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+.onepo-widget.open {
+  transform: translateY(0) !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}

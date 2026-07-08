@@ -1,0 +1,17 @@
+lightgbm
+catboost
+scikit-learn
+pandas
+numpy
+joblib
+fastapi
+pydantic 
+email-validator 
+python-dotenv 
+python-multipart 
+sqlalchemy 
+asyncpg 
+psycopg2-binary 
+pyodbc 
+bcrypt 
+PyJWT 

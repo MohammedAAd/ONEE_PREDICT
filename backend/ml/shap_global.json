@@ -1,0 +1,237 @@
+{
+  "genere_le": "2026-05-24",
+  "cibles": {
+    "distribution": {
+      "facteurs": [
+        {
+          "variable": "Dotations (l/hab/j)",
+          "importance_pct": 19.7,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Abonnés / compteurs",
+          "importance_pct": 12.0,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Rendements du réseau",
+          "importance_pct": 11.4,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Historique de consommation",
+          "importance_pct": 11.1,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Profil propre du centre",
+          "importance_pct": 11.0,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Historique de distribution",
+          "importance_pct": 8.0,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Capacité installations / AEP",
+          "importance_pct": 6.3,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Pertes du réseau",
+          "importance_pct": 4.4,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Historique de production",
+          "importance_pct": 4.2,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Contexte géographique",
+          "importance_pct": 3.3,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Structure de consommation (types)",
+          "importance_pct": 3.2,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Démographie",
+          "importance_pct": 2.4,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Tendance temporelle",
+          "importance_pct": 2.0,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Taux de branchement",
+          "importance_pct": 1.0,
+          "effet": "hausse"
+        }
+      ]
+    },
+    "production": {
+      "facteurs": [
+        {
+          "variable": "Dotations (l/hab/j)",
+          "importance_pct": 22.5,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Abonnés / compteurs",
+          "importance_pct": 18.6,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Rendements du réseau",
+          "importance_pct": 14.7,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Historique de consommation",
+          "importance_pct": 13.8,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Structure de consommation (types)",
+          "importance_pct": 5.4,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Démographie",
+          "importance_pct": 4.6,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Historique de distribution",
+          "importance_pct": 4.6,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Historique de production",
+          "importance_pct": 4.1,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Capacité installations / AEP",
+          "importance_pct": 4.1,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Tendance temporelle",
+          "importance_pct": 2.2,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Taux de branchement",
+          "importance_pct": 2.2,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Pertes du réseau",
+          "importance_pct": 1.3,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Contexte géographique",
+          "importance_pct": 1.2,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Tension sur la capacité",
+          "importance_pct": 0.7,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Profil propre du centre",
+          "importance_pct": 0.0,
+          "effet": "hausse"
+        }
+      ]
+    },
+    "consommation_totale": {
+      "facteurs": [
+        {
+          "variable": "Dotations (l/hab/j)",
+          "importance_pct": 24.0,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Abonnés / compteurs",
+          "importance_pct": 16.3,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Historique de consommation",
+          "importance_pct": 15.6,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Profil propre du centre",
+          "importance_pct": 11.7,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Capacité installations / AEP",
+          "importance_pct": 6.6,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Rendements du réseau",
+          "importance_pct": 5.1,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Contexte géographique",
+          "importance_pct": 4.6,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Démographie",
+          "importance_pct": 4.2,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Tendance temporelle",
+          "importance_pct": 3.3,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Historique de distribution",
+          "importance_pct": 2.8,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Historique de production",
+          "importance_pct": 2.3,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Taux de branchement",
+          "importance_pct": 1.7,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Structure de consommation (types)",
+          "importance_pct": 1.6,
+          "effet": "baisse"
+        },
+        {
+          "variable": "Pertes du réseau",
+          "importance_pct": 0.3,
+          "effet": "hausse"
+        },
+        {
+          "variable": "Tension sur la capacité",
+          "importance_pct": 0.0,
+          "effet": "hausse"
+        }
+      ]
+    }
+  }
+}
