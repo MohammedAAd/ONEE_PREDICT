@@ -5,6 +5,7 @@ import { useChart } from '../hooks/useChart';
 import { chartColors, chartOptions } from '../utils/chartConfig';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+const MONTHS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
 
 const Production = () => {
   // États pour chaque chart
@@ -26,8 +27,6 @@ const Production = () => {
   const [selectedYear, setSelectedYear] = useState(2024);
   const [selectedInstallation, setSelectedInstallation] = useState(null);
   
-  const months = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
-
   // 🔄 Récupérer la liste des régions
   useEffect(() => {
     const fetchRegions = async () => {
@@ -173,7 +172,7 @@ const Production = () => {
   };
 
   // 📊 Chart production mensuelle
-  const monthly = monthlyData || { labels: months, historique: [], prediction: [], year: selectedYear, pred_year: selectedYear + 1 };
+  const monthly = monthlyData || { labels: MONTHS, historique: [], prediction: [], year: selectedYear, pred_year: selectedYear + 1 };
   const formatMm3 = (value) => `${(Number(value) || 0).toFixed(2)} Mm³`;
   const hasPrediction = useMemo(
     () => (Array.isArray(monthly.prediction) ? monthly.prediction.some(v => (v || 0) > 0) : false),
@@ -191,7 +190,7 @@ const Production = () => {
     }
     const avgPred = pred.reduce((sum, v) => sum + (v || 0), 0) / pred.length;
     const riskMonths = pred.map((value, idx) => ({
-      month: months[idx] || `M${idx + 1}`,
+      month: MONTHS[idx] || `M${idx + 1}`,
       value: value || 0,
       deltaPct: hist[idx] ? ((value || 0) - hist[idx]) / Math.max(hist[idx], 1) * 100 : 0,
     })).filter(x => x.value > 0 && (x.value < avgPred * 0.90 || x.deltaPct < -8));
@@ -207,7 +206,7 @@ const Production = () => {
   useChart('prodMonthChart', {
     type: 'line',
     data: {
-      labels: months,
+      labels: MONTHS,
       datasets: [
         {
           label: `${monthly.year} (historique)`,
@@ -232,7 +231,7 @@ const Production = () => {
         legend: { display: true, labels: { color: '#8ba8cc', boxWidth: 10, font: { size: 10 } } } 
       } 
     }
-  });
+  }, !loading);
 
   const installations = installationsData;
   const stats = statsData;
@@ -504,7 +503,7 @@ const Production = () => {
         </div>
       </div>
 
-      <style jsx>{`
+      <style>{`
         .spin {
           animation: spin 1s linear infinite;
         }

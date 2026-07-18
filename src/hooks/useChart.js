@@ -2,14 +2,15 @@
 import { useLayoutEffect, useRef } from 'react';
 import Chart from 'chart.js/auto';
 
-export const useChart = (canvasId, config) => {
+export const useChart = (canvasId, config, enabled = true) => {
   const chartRef = useRef(null);
 
   // 🔥 useLayoutEffect s'exécute SYNCHRONE après le DOM, avant le paint
   useLayoutEffect(() => {
+    if (!enabled) return;
+
     const canvas = document.getElementById(canvasId);
     if (!canvas) {
-      console.warn(`⚠️ Canvas #${canvasId} non trouvé`);
       return;
     }
 
@@ -48,5 +49,5 @@ export const useChart = (canvasId, config) => {
         chartRef.current = null;
       }
     };
-  }, [canvasId, JSON.stringify(config)]); // Recrée si config change
+  }, [canvasId, enabled, JSON.stringify(config)]); // Recrée si config change
 };

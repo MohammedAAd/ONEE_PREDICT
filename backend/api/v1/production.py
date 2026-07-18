@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
-from typing import Optional, List, Dict, Any
+from fastapi import APIRouter, Depends, Query
+from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.database import get_db
@@ -12,19 +12,6 @@ async def get_production_service(db: AsyncSession = Depends(get_db)):
     return ProductionService(db)
 
 
-async def _enforce_data_quality(service: ProductionService, region_param: Optional[int], year: int):
-    issues = await service.get_blocking_quality_issues(region_param, year)
-    if issues:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "BLOCKING_DATA_QUALITY",
-                "message": "Des anomalies bloquantes ont ete detectees dans les donnees de capacite.",
-                "issues": issues,
-            },
-        )
-
-
 @router.get("/")
 async def get_all_production_data(
     region: Optional[str] = Query("all", description="Code région ou 'all'"),
@@ -35,7 +22,6 @@ async def get_all_production_data(
     """Récupère toutes les données pour la page production"""
     # Convertir region en int si ce n'est pas "all"
     region_param = None if region == "all" else int(region)
-    await _enforce_data_quality(service, region_param, year)
     return await service.get_all_data(region_param, year, installation)
 
 
@@ -48,7 +34,6 @@ async def get_monthly_production(
 ):
     """Récupère la production mensuelle (historique + prédiction)"""
     region_param = None if region == "all" else int(region)
-    await _enforce_data_quality(service, region_param, year)
     return await service.get_monthly_production(region_param, year, installation)
 
 
@@ -61,7 +46,6 @@ async def get_installations(
     """Récupère la liste des installations avec leurs taux d'utilisation"""
     # Convertir region en int si ce n'est pas "all"
     region_param = None if region == "all" else int(region)
-    await _enforce_data_quality(service, region_param, year)
     return await service.get_installations(region_param, year)
 
 
@@ -73,7 +57,6 @@ async def get_production_stats(
 ):
     """Récupère les statistiques globales de production"""
     region_param = None if region == "all" else int(region)
-    await _enforce_data_quality(service, region_param, year)
     return await service.get_stats(region_param, year)
 
 

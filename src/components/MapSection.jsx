@@ -58,6 +58,41 @@ const FallbackCoordinates = {
 
 const DEFAULT_COORDINATE = [31.5, -6.5];
 
+const LIGHT_TILE_PROVIDERS = [
+  {
+    name: 'OpenStreetMap',
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    subdomains: 'abc',
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19,
+  },
+  {
+    name: 'OpenStreetMap France',
+    url: 'https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png',
+    subdomains: 'abc',
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 20,
+  },
+  {
+    name: 'Carto Light',
+    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    subdomains: 'abcd',
+    attribution: '&copy; CARTO &copy; OpenStreetMap contributors',
+    maxZoom: 19,
+  },
+];
+
+const DARK_TILE_PROVIDERS = [
+  ...LIGHT_TILE_PROVIDERS,
+  {
+    name: 'Carto Dark',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    subdomains: 'abcd',
+    attribution: '&copy; CARTO &copy; OpenStreetMap contributors',
+    maxZoom: 19,
+  },
+];
+
 const getPerformanceScore = (centre) => {
   const rendDistribution = Number(centre?.rend_distribution ?? centre?.rendDistribution ?? 0);
   const tauxBranchement = Number(centre?.taux_branchement ?? centre?.tauxBranchement ?? 0);
@@ -141,6 +176,32 @@ const MapSection = ({ vulnerability, masterCentres }) => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [installTypeFilter, setInstallTypeFilter] = useState('all');
   const [isDarkMode, setIsDarkMode] = useState(() => document.body.classList.contains('dark'));
+
+  const mountTileLayerWithFallback = (L, map, providers) => {
+    const addProvider = (providerIndex) => {
+      const provider = providers[providerIndex];
+      const layer = L.tileLayer(provider.url, {
+        maxZoom: provider.maxZoom ?? 19,
+        subdomains: provider.subdomains,
+        detectRetina: true,
+      });
+
+      let tileErrors = 0;
+      layer.on('tileerror', () => {
+        tileErrors += 1;
+        // If the current provider repeatedly fails, switch to the next one.
+        if (tileErrors >= 6 && providerIndex < providers.length - 1 && tileLayerRef.current === layer) {
+          map.removeLayer(layer);
+          tileLayerRef.current = addProvider(providerIndex + 1);
+        }
+      });
+
+      layer.addTo(map);
+      return layer;
+    };
+
+    return addProvider(0);
+  };
 
   const realCentres = useMemo(() => {
     const centres = Array.isArray(masterCentres?.centres) ? masterCentres.centres : [];
@@ -248,15 +309,10 @@ const MapSection = ({ vulnerability, masterCentres }) => {
       attributionControl: false,
     });
 
-    const tileUrl = isDarkMode
-      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+    const providers = isDarkMode ? DARK_TILE_PROVIDERS : LIGHT_TILE_PROVIDERS;
+    tileLayerRef.current = mountTileLayerWithFallback(L, map, providers);
 
-    tileLayerRef.current = L.tileLayer(tileUrl, {
-      maxZoom: 18,
-    }).addTo(map);
-
-    L.control.attribution({ prefix: '© CartoDB · OpenStreetMap' }).addTo(map);
+    L.control.attribution({ prefix: '&copy; OpenStreetMap contributors' }).addTo(map);
 
     mapInstanceRef.current = map;
 
@@ -276,11 +332,8 @@ const MapSection = ({ vulnerability, masterCentres }) => {
       map.removeLayer(tileLayerRef.current);
     }
 
-    const tileUrl = isDarkMode
-      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
-
-    tileLayerRef.current = L.tileLayer(tileUrl, { maxZoom: 18 }).addTo(map);
+    const providers = isDarkMode ? DARK_TILE_PROVIDERS : LIGHT_TILE_PROVIDERS;
+    tileLayerRef.current = mountTileLayerWithFallback(L, map, providers);
   }, [isDarkMode, leafletLoaded]);
 
   const visibleCentres = useMemo(() => {

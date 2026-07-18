@@ -39,28 +39,30 @@ const Dashboard = () => {
   const [consommationTypesData, setConsommationTypesData] = useState(null);
   const [vulnerabilityData, setVulnerabilityData] = useState(null);
   const [masterCentresData, setMasterCentresData] = useState(null);
+  
+  // NOUVEAU : États séparés pour les zones par région
   const [allZones, setAllZones] = useState([]);
+  const [allZonesFiltered, setAllZonesFiltered] = useState([]);
   
   const [regions, setRegions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingRegions, setLoadingRegions] = useState(true);
+  const [loadingZones, setLoadingZones] = useState(false);
   const [error, setError] = useState(null);
   const [activeBilanTab, setActiveBilanTab] = useState('zones');
-  const [activeConsumptionTab, setActiveConsumptionTab] = useState('chart');
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isRegionDropdownOpen, setIsRegionDropdownOpen] = useState(false);
   
   // État pour la région sélectionnée
   const [selectedRegion, setSelectedRegion] = useState({ code: 'all', name: 'Toutes les régions' });
   
   const [filters, setFilters] = useState({
     startYear: 2020,
-    endYear: 2024,  // Année max fixée à 2024 pour les données réelles
+    endYear: 2024,
     bilanZones: [],
-    mode: 'real'    // Mode fixé à 'real' uniquement
+    mode: 'real'
   });
 
-  // 🔄 Récupérer la liste des régions depuis l'API V2
+  // Récupérer la liste des régions depuis l'API V2
   useEffect(() => {
     const fetchRegions = async () => {
       try {
@@ -82,7 +84,42 @@ const Dashboard = () => {
     fetchRegions();
   }, []);
 
-  // 📊 Fonction pour récupérer les données de timeseries (Consommation vs Production) depuis V2
+  // NOUVEAU : Récupérer les zones filtrées par région
+  const fetchZonesByRegion = useCallback(async (regionCode) => {
+    try {
+      setLoadingZones(true);
+      const params = new URLSearchParams({
+        region: regionCode,
+        year: filters.endYear.toString()
+      });
+      const response = await fetch(`${API_BASE}${API_V2_PREFIX}/zones/by-region?${params}`);
+      if (!response.ok) throw new Error('Erreur chargement zones');
+      const data = await response.json();
+      
+      // Mettre à jour les zones filtrées
+      setAllZonesFiltered(data.zones || []);
+      
+      // Si toutes les régions sont sélectionnées, utiliser toutes les zones
+      if (regionCode === 'all') {
+        setAllZones(data.zones || []);
+      } else {
+        setAllZones(data.zones || []);
+      }
+    } catch (err) {
+      console.error('❌ Erreur chargement zones:', err);
+      setAllZonesFiltered([]);
+      setAllZones([]);
+    } finally {
+      setLoadingZones(false);
+    }
+  }, [filters.endYear]);
+
+  // Charger les zones quand la région change
+  useEffect(() => {
+    fetchZonesByRegion(selectedRegion.code);
+  }, [selectedRegion.code, fetchZonesByRegion]);
+
+  // Fonctions de fetch existantes...
   const fetchTimeseries = useCallback(async () => {
     try {
       const params = new URLSearchParams({
@@ -99,7 +136,6 @@ const Dashboard = () => {
     }
   }, [selectedRegion.code, filters.startYear, filters.endYear]);
 
-  // 📊 Fonction pour récupérer les données de timeseries détaillé depuis V2
   const fetchTimeseriesDetail = useCallback(async () => {
     try {
       const params = new URLSearchParams({
@@ -116,7 +152,6 @@ const Dashboard = () => {
     }
   }, [selectedRegion.code, filters.startYear, filters.endYear]);
 
-  // 📊 Fonction pour récupérer les statistiques depuis V2
   const fetchStats = useCallback(async () => {
     try {
       const params = new URLSearchParams({
@@ -132,7 +167,6 @@ const Dashboard = () => {
     }
   }, [selectedRegion.code, filters.endYear]);
 
-  // 📊 Fonction pour récupérer le bilan par zone depuis V2
   const fetchBilanZones = useCallback(async () => {
     try {
       const params = new URLSearchParams({
@@ -143,15 +177,11 @@ const Dashboard = () => {
       if (!response.ok) throw new Error('Erreur chargement bilan zones');
       const data = await response.json();
       setBilanZonesData(data);
-      if (data.labels) {
-        setAllZones(data.labels);
-      }
     } catch (err) {
       console.error("❌ Erreur bilan zones:", err);
     }
   }, [selectedRegion.code, filters.endYear]);
 
-  // 📊 Fonction pour récupérer le bilan par province depuis V2
   const fetchBilanProvinces = useCallback(async () => {
     try {
       const params = new URLSearchParams({
@@ -167,7 +197,6 @@ const Dashboard = () => {
     }
   }, [selectedRegion.code, filters.endYear]);
 
-  // 📊 Fonction pour récupérer la vulnérabilité depuis V2
   const fetchVulnerability = useCallback(async () => {
     try {
       const params = new URLSearchParams({ region: selectedRegion.code });
@@ -180,20 +209,92 @@ const Dashboard = () => {
     }
   }, [selectedRegion.code]);
 
-  // 📊 Fonction pour récupérer la liste des centres depuis V2
   const fetchMasterCentres = useCallback(async () => {
     try {
       const params = new URLSearchParams({ region: selectedRegion.code });
       const response = await fetch(`${API_BASE}${API_V2_PREFIX}/master/centres?${params}`);
-      if (!response.ok) throw new Error('Erreur chargement centres');
-      const data = await response.json();
-      setMasterCentresData(data);
+      if (response.ok) {
+        const data = await response.json();
+        setMasterCentresData(data);
+        return;
+      }
+
+      if (response.status === 409) {
+        const conflictPayload = await response.json().catch(() => ({}));
+        const fallbackParams = new URLSearchParams({
+          region: selectedRegion.code,
+          year: filters.endYear.toString(),
+        });
+        const fallbackResponse = await fetch(`${API_BASE}${API_V2_PREFIX}/centres?${fallbackParams}`);
+
+        if (fallbackResponse.ok) {
+          const centresOnly = await fallbackResponse.json();
+          const centres = Array.isArray(centresOnly?.centres) ? centresOnly.centres : [];
+
+          const normalize = (value) =>
+            String(value || '')
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .trim()
+              .toLowerCase();
+
+          const centresByName = new Map(
+            centres
+              .filter((c) => c?.name)
+              .map((c) => [normalize(c.name), c])
+          );
+          const centresById = new Map(
+            centres
+              .filter((c) => c?.id)
+              .map((c) => [String(c.id), c])
+          );
+
+          const installParams = new URLSearchParams({ region: selectedRegion.code });
+          const installationsListResponse = await fetch(`${API_BASE}/production/installations/list?${installParams}`);
+          let fallbackInstallations = [];
+
+          if (installationsListResponse.ok) {
+            const installationsList = await installationsListResponse.json();
+            fallbackInstallations = (Array.isArray(installationsList) ? installationsList : []).map((inst) => {
+              const linkedCentre =
+                (inst?.centre_id ? centresById.get(String(inst.centre_id)) : null) ||
+                centresByName.get(normalize(inst?.centre));
+
+              return {
+                id: inst?.id || inst?.name,
+                name: inst?.name || inst?.id || 'Installation',
+                type: 'station_traitement',
+                type_raw: 'Station traitement',
+                debit: 0,
+                tauxUtil: 0,
+                status: 'ok',
+                centre_id: linkedCentre?.id || inst?.centre_id || null,
+                centre_name: linkedCentre?.name || inst?.centre || null,
+                province: linkedCentre?.province || inst?.province || null,
+                region_name: linkedCentre?.region_name || inst?.region_name || selectedRegion.name || null,
+              };
+            });
+          }
+
+          setMasterCentresData({
+            centres,
+            installations: fallbackInstallations,
+            total: centresOnly?.total || centres.length,
+            total_installations: fallbackInstallations.length,
+            region: selectedRegion.code,
+            blocking_issues: conflictPayload?.detail?.issues || [],
+            fallback_mode: 'centres_only',
+          });
+          return;
+        }
+      }
+
+      throw new Error('Erreur chargement centres');
     } catch (err) {
       console.error('❌ Erreur centres:', err);
     }
-  }, [selectedRegion.code]);
+  }, [selectedRegion.code, filters.endYear]);
 
-  // 📊 Fonction pour récupérer le bilan par région depuis V2
   const fetchBilanRegions = useCallback(async () => {
     try {
       const params = new URLSearchParams({
@@ -208,7 +309,6 @@ const Dashboard = () => {
     }
   }, [filters.endYear]);
 
-  // 📊 Fonction pour récupérer les rendements depuis V2
   const fetchRendements = useCallback(async () => {
     try {
       const params = new URLSearchParams({
@@ -223,7 +323,6 @@ const Dashboard = () => {
     }
   }, [selectedRegion.code]);
 
-  // 📊 Fonction pour récupérer les alertes depuis V2
   const fetchAlerts = useCallback(async () => {
     try {
       const params = new URLSearchParams({
@@ -238,7 +337,6 @@ const Dashboard = () => {
     }
   }, [selectedRegion.code]);
 
-  // 📊 Fonction pour récupérer la consommation par type depuis V2 (fact_long)
   const fetchConsommationTypes = useCallback(async () => {
     try {
       const params = new URLSearchParams({
@@ -262,6 +360,9 @@ const Dashboard = () => {
       setLoading(true);
       setError(null);
       
+      // Recharger les zones avec la région actuelle
+      await fetchZonesByRegion(selectedRegion.code);
+      
       await Promise.all([
         fetchTimeseries(),
         fetchTimeseriesDetail(),
@@ -284,7 +385,8 @@ const Dashboard = () => {
     }
   }, [fetchTimeseries, fetchTimeseriesDetail, fetchStats, fetchBilanZones, 
       fetchBilanProvinces, fetchBilanRegions, fetchRendements, fetchAlerts, 
-      fetchVulnerability, fetchConsommationTypes]);
+      fetchVulnerability, fetchMasterCentres, fetchConsommationTypes, 
+      fetchZonesByRegion, selectedRegion.code]);
 
   useEffect(() => {
     fetchAllData();
@@ -293,7 +395,9 @@ const Dashboard = () => {
   // Handler pour changer de région
   const handleRegionChange = (region) => {
     setSelectedRegion(region);
-    setIsRegionDropdownOpen(false);
+    // Les zones seront rechargées automatiquement via fetchAllData
+    // mais on vide la sélection de zones pour éviter les incohérences
+    setFilters(prev => ({ ...prev, bilanZones: [] }));
   };
 
   // 📊 Données avec fallback
@@ -329,14 +433,17 @@ const Dashboard = () => {
   const alerts = alertsData || [];
   const consommationTypes = consommationTypesData || { labels: [], datasets: [] };
 
-  // Filtrage frontend du bilan
+  // 🔥 Filtrage frontend du bilan - UTILISER allZones (les zones de la région)
   const filteredBilan = useMemo(() => {
     if (activeBilanTab !== 'zones') {
       return activeBilanTab === 'provinces' ? bilanProvinces : bilanRegions;
     }
     if (!bilan.labels?.length) return { labels: [], values: [] };
+    
+    // Si aucune zone sélectionnée, afficher toutes les zones de la région
     if (filters.bilanZones.length === 0) return bilan;
     
+    // Filtrer les zones sélectionnées
     const indices = bilan.labels
       .map((z, i) => filters.bilanZones.includes(z) ? i : -1)
       .filter(i => i !== -1);
@@ -347,7 +454,7 @@ const Dashboard = () => {
     };
   }, [bilan, bilanProvinces, bilanRegions, filters.bilanZones, activeBilanTab]);
 
-  // 📈 Chart principal (Conso vs Prod) - sans pointillés pour les prévisions
+  // 📈 Chart principal (Conso vs Prod)
   const mainChartConfig = useMemo(() => ({
     type: 'line',
     data: {
@@ -522,7 +629,7 @@ const Dashboard = () => {
 
   useChart('rendChart', rendChartConfig);
 
-  // 📊 Consommation par type chart (Line)
+  // 📊 Consommation par type chart
   const consommationTypesChartConfig = useMemo(() => ({
     type: 'line',
     data: {
@@ -667,9 +774,14 @@ const Dashboard = () => {
               onRegionChange={handleRegionChange}
               loading={loadingRegions}
             />
+            {loadingZones && (
+              <span style={{ fontSize: '0.75rem', color: 'var(--text2)' }}>
+                Chargement des zones...
+              </span>
+            )}
           </div>
 
-          {/* Période - uniquement données réelles jusqu'à 2024 */}
+          {/* Période */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <Calendar size={16} style={{ color: 'var(--text2)' }} />
             <label style={{ fontSize: '0.85rem', color: 'var(--text2)', fontWeight: '500' }}>Période :</label>
@@ -688,19 +800,16 @@ const Dashboard = () => {
             >
               {[2020, 2021, 2022, 2023, 2024].map(y => <option key={y} value={y}>{y}</option>)}
             </select>
-            {/* <span style={{ fontSize: '0.75rem', color: 'var(--primary)', marginLeft: '8px' }}>
-              ⚡ Données réelles uniquement
-            </span> */}
           </div>
           
           {activeBilanTab === 'zones' && (
             <ZoneFilter
-              zones={allZones}
+              zones={allZones}  // 🔥 Utiliser allZones (les zones de la région)
               selectedZones={filters.bilanZones}
               onZoneToggle={handleBilanZoneToggle}
               onSelectAll={handleSelectAllBilanZones}
               onClearAll={handleClearBilanZones}
-              label="Filtrer le bilan par zone"
+              label={`Filtrer le bilan par zone (${selectedRegion.name})`}
               maxDisplay={15}
               showCount={true}
               region={selectedRegion.code}
@@ -818,7 +927,7 @@ const Dashboard = () => {
             Solde production − consommation{' '}
             {activeBilanTab === 'zones' && selectedCount > 0
               ? `· ${selectedCount}/${totalCount} zones sélectionnées`
-              : `· Toutes les ${bilanTitle}`}
+              : `· Toutes les zones de ${selectedRegion.name}`}
           </div>
           <canvas id="bilanChart" height="300" style={{ width: '100%', display: 'block' }}></canvas>
         </div>
@@ -856,13 +965,27 @@ const Dashboard = () => {
           <div className="card-title">Carte de vulnérabilité</div>
         </div>
         <div style={{ padding: '0 16px 16px' }}>
+          {masterCentresData?.fallback_mode === 'centres_only' && (
+            <div style={{
+              marginBottom: '12px',
+              padding: '10px 12px',
+              borderRadius: '10px',
+              border: '1px solid #f59e0b',
+              background: '#f59e0b22',
+              color: 'var(--text)',
+              fontSize: '0.82rem',
+            }}>
+              Affichage partiel: les centres sont affichés, mais les installations sont temporairement masquées
+              en raison d'anomalies de qualité de données detectées par l'API.
+            </div>
+          )}
           <MapSection vulnerability={vulnerabilityData} masterCentres={masterCentresData} />
         </div>
       </div>
 
       <div className="card">
         <div className="card-header">
-          <div className="card-title">⚠️ Alertes actives</div>
+          <div className="card-title"> Alertes actives</div>
         </div>
         <div className="alerts-list">
           {alerts.map((alert, idx) => (

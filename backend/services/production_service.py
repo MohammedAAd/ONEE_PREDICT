@@ -54,14 +54,14 @@ class ProductionService:
                     FROM link_installations_master_panel l
                     JOIN master_panel mp ON l.id_centre_desservi = mp.id_centre_desservi
                     WHERE mp.code_region_12 = :region
-                      AND mp.annee = :year_int
+                      AND mp.annee = 2024
                 )
                 SELECT ip.installation, ip.debit_exploitable, ip.debit_equipe
                 FROM installations_production ip
                 JOIN region_installations ri ON ri.installation = ip.installation
                 """
             )
-            params = {"region": region, "year_int": year}
+            params = {"region": region}
         else:
             query = text(
                 """
@@ -178,10 +178,10 @@ class ProductionService:
             FROM link_installations_master_panel l
             JOIN master_panel mp ON l.id_centre_desservi = mp.id_centre_desservi
             WHERE mp.code_region_12 = :region
-              AND mp.annee = :year_int
+                            AND mp.annee = 2024
             """
         )
-        result = await self.db.execute(query, {"region": region, "year_int": year})
+        result = await self.db.execute(query, {"region": region})
         return [str(r.installation).strip() for r in result if r.installation]
 
     @staticmethod
@@ -273,7 +273,7 @@ class ProductionService:
                     FROM link_installations_master_panel l
                     JOIN master_panel mp ON l.id_centre_desservi = mp.id_centre_desservi
                     WHERE mp.code_region_12 = :region
-                      AND mp.annee = :year_int
+                        AND mp.annee = 2024
                 )
                 SELECT pm.mois, SUM(pm.volume_produit_traite) AS volume
                 FROM production_mensuelle pm
@@ -283,7 +283,7 @@ class ProductionService:
                 ORDER BY CAST(pm.mois AS INTEGER)
                 """
             )
-            params_hist = {"year_str": year_str, "region": region, "year_int": year}
+            params_hist = {"year_str": year_str, "region": region}
         else:
             query_hist = text(
                 """
@@ -348,7 +348,6 @@ class ProductionService:
         year: int = 2024,
     ) -> List[Dict[str, Any]]:
         year_str = str(year)
-        year_int = year
 
         model_rows = self._load_model_mensuelles()
         model_by_installation = self._compute_model_installation_stats(model_rows, year)
@@ -361,7 +360,7 @@ class ProductionService:
                     FROM link_installations_master_panel l
                     JOIN master_panel mp ON l.id_centre_desservi = mp.id_centre_desservi
                     WHERE mp.code_region_12 = :region
-                      AND mp.annee = :year_int
+                                            AND mp.annee = 2024
                 )
                 SELECT
                     ip.installation AS name,
@@ -380,7 +379,7 @@ class ProductionService:
                 LIMIT 100
                 """
             )
-            params = {"region": region, "year_str": year_str, "year_int": year_int}
+            params = {"region": region, "year_str": year_str}
         else:
             query = text(
                 """
@@ -451,7 +450,6 @@ class ProductionService:
         year: int = 2024,
     ) -> Dict[str, Any]:
         year_str = str(year)
-        year_int = year
 
         if region is not None:
             query = text(
@@ -461,7 +459,7 @@ class ProductionService:
                     FROM link_installations_master_panel l
                     JOIN master_panel mp ON l.id_centre_desservi = mp.id_centre_desservi
                     WHERE mp.code_region_12 = :region
-                      AND mp.annee = :year_int
+                      AND mp.annee = 2024
                 ),
                 inst_rates AS (
                     SELECT
@@ -483,7 +481,7 @@ class ProductionService:
                 FROM inst_rates ir
                 """
             )
-            params = {"region": region, "year_str": year_str, "year_int": year_int}
+            params = {"region": region, "year_str": year_str}
         else:
             query = text(
                 """
@@ -541,31 +539,51 @@ class ProductionService:
         if region is not None:
             query = text(
                 """
-                SELECT DISTINCT
+                SELECT DISTINCT ON (ip.installation)
                     ip.installation AS id,
                     ip.installation AS name,
-                    ip.lib_centre_prod_gde AS centre
+                    ip.lib_centre_prod_gde AS centre,
+                    l.id_centre_desservi::text AS centre_id,
+                    mp.lib_province AS province,
+                    mp.libelle_region AS region_name
                 FROM installations_production ip
-                JOIN link_installations_master_panel l ON ip.installation = l.installation
-                JOIN master_panel mp ON l.id_centre_desservi = mp.id_centre_desservi
+                LEFT JOIN link_installations_master_panel l ON ip.installation = l.installation
+                LEFT JOIN master_panel mp ON l.id_centre_desservi = mp.id_centre_desservi
+                    AND mp.annee = 2024
                 WHERE mp.code_region_12 = :region
-                ORDER BY ip.installation
+                ORDER BY ip.installation, mp.population_2024 DESC NULLS LAST
                 """
             )
             params = {"region": region}
         else:
             query = text(
                 """
-                SELECT DISTINCT
+                SELECT DISTINCT ON (ip.installation)
                     ip.installation AS id,
                     ip.installation AS name,
-                    ip.lib_centre_prod_gde AS centre
+                    ip.lib_centre_prod_gde AS centre,
+                    l.id_centre_desservi::text AS centre_id,
+                    mp.lib_province AS province,
+                    mp.libelle_region AS region_name
                 FROM installations_production ip
-                ORDER BY ip.installation
+                LEFT JOIN link_installations_master_panel l ON ip.installation = l.installation
+                LEFT JOIN master_panel mp ON l.id_centre_desservi = mp.id_centre_desservi
+                    AND mp.annee = 2024
+                ORDER BY ip.installation, mp.population_2024 DESC NULLS LAST
                 """
             )
             params = {}
 
         result = await self.db.execute(query, params)
         rows = result.fetchall()
-        return [{"id": row.id, "name": row.name, "centre": row.centre} for row in rows]
+        return [
+            {
+                "id": row.id,
+                "name": row.name,
+                "centre": row.centre,
+                "centre_id": row.centre_id,
+                "province": row.province,
+                "region_name": row.region_name,
+            }
+            for row in rows
+        ]

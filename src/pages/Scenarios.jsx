@@ -142,7 +142,10 @@ const PILOT_ZONES = [
     title: 'Larache',
     subtitle: 'Extension LOUKKOUS / dessalement / appui Tanger',
     note: 'Étude de renforcement de la ressource (LOUKKOUS, dessalement local, et transfert potentiel depuis Tanger 150 Mm³/an).',
-    centres: [],
+    centres: [
+      { id: '01.234.56789', name: 'LOUKKOUS' },
+      { id: '01.234.56790', name: 'Dessalement local' },
+    ],
   },
 ];
 
@@ -2274,7 +2277,7 @@ export default function Scenarios() {
 
         .pilot-zone-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+          grid-template-columns: repeat(4, 1fr);
           gap: 18px;
           margin-bottom: 30px;
         }
@@ -2285,6 +2288,9 @@ export default function Scenarios() {
           border-radius: 16px;
           padding: 18px;
           box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+          display: flex;
+          flex-direction: column;
+          min-height: 280px;
         }
 
         .pilot-zone-header {
@@ -2314,12 +2320,14 @@ export default function Scenarios() {
           color: #3b82f6;
           font-size: 0.7rem;
           font-weight: 700;
+          white-space: nowrap;
         }
 
         .pilot-zone-note {
           font-size: 0.8rem;
           color: #475569;
           margin-bottom: 14px;
+          flex-shrink: 0;
         }
 
         .pilot-zone-non-exhaustive {
@@ -2332,14 +2340,16 @@ export default function Scenarios() {
           font-size: 0.72rem;
           font-weight: 700;
           margin-bottom: 12px;
+          flex-shrink: 0;
         }
 
         .pilot-centers-list {
           list-style: none;
           padding: 0;
-          margin: 0;
+          margin: 0 0 12px 0;
           display: grid;
           gap: 10px;
+          flex: 1;
         }
 
         .pilot-centers-list li {
@@ -2371,6 +2381,7 @@ export default function Scenarios() {
           background: #f1f5f9;
           color: #64748b;
           font-size: 0.85rem;
+          flex: 1;
         }
 
         .pilot-zone-action {
@@ -2385,11 +2396,24 @@ export default function Scenarios() {
           font-weight: 700;
           cursor: pointer;
           transition: all 0.2s ease;
+          flex-shrink: 0;
         }
 
         .pilot-zone-action:hover {
           background: #e0e7ff;
           border-color: #a5b4fc;
+        }
+
+        @media (max-width: 1200px) {
+          .pilot-zone-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+        }
+
+        @media (max-width: 768px) {
+          .pilot-zone-grid {
+            grid-template-columns: 1fr;
+          }
         }
       `}</style>
     </div>
