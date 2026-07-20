@@ -11,6 +11,23 @@ import { previsionApi } from '../services/api';
 // Mois de l'année
 const MONTHS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
 
+function MonthlyForecastUnavailable({ year, onShow2024 }) {
+  return (
+    <div className="model-data-unavailable">
+      <div className="model-data-unavailable-icon"><Calendar size={20} /></div>
+      <div>
+        <div className="model-data-unavailable-title">Prévision mensuelle non livrée pour {year}</div>
+        <div className="model-data-unavailable-text">
+          Le modèle annuel fournit bien la prévision de cette année, mais aucun profil mensuel entraîné n’est disponible. Les données 2024 ne sont donc pas affichées comme si elles étaient une prévision {year}.
+        </div>
+        <button className="model-data-unavailable-action" onClick={onShow2024}>
+          Voir le profil mensuel disponible (2024)
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const Prediction_Y = () => {
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -23,8 +40,8 @@ const Prediction_Y = () => {
   const [shapParCentre, setShapParCentre] = useState([]);
   const [centres, setCentres] = useState([]);
   const [drs, setDrs] = useState([]);
-  const [mensuelSourceYear, setMensuelSourceYear] = useState(2024);
-  const [drSourceYear, setDrSourceYear] = useState(2024);
+  const [mensuelSourceYear, setMensuelSourceYear] = useState(null);
+  const [drSourceYear, setDrSourceYear] = useState(null);
   
   // États des filtres
   const [selectedCentre, setSelectedCentre] = useState(null);
@@ -46,7 +63,10 @@ const Prediction_Y = () => {
     return map;
   }, [centres]);
 
-  const ANNEE_OPTIONS = [2024, 2025, 2026, 2027, 2028, 2029, 2030];
+  const ANNEE_OPTIONS = useMemo(() => (
+    [...new Set(previsionsAnnue.map((row) => Number(row.annee)).filter(Number.isFinite))]
+      .sort((a, b) => a - b)
+  ), [previsionsAnnue]);
   const CIBLE_OPTIONS = [
     { value: 'distribution', label: 'Distribution' },
     { value: 'production', label: 'Production' },
@@ -110,14 +130,8 @@ const Prediction_Y = () => {
     const loadMensuelles = async () => {
       try {
         const rows = await previsionApi.previsionsMensuelles(null, selectedAnnee);
-        if ((rows || []).length > 0) {
-          setPrevisionsMensuelles(rows || []);
-          setMensuelSourceYear(selectedAnnee);
-          return;
-        }
-        const fallback = await previsionApi.previsionsMensuelles(null, 2024);
-        setPrevisionsMensuelles(fallback || []);
-        setMensuelSourceYear(2024);
+        setPrevisionsMensuelles(rows || []);
+        setMensuelSourceYear((rows || []).length > 0 ? selectedAnnee : null);
       } catch (e) {
         console.error('Chargement mensuel:', e);
       }
@@ -129,14 +143,8 @@ const Prediction_Y = () => {
     const loadDr = async () => {
       try {
         const rows = await previsionApi.previsionsDr(selectedDr?.id || null, selectedAnnee);
-        if ((rows || []).length > 0) {
-          setPrevisionsDr(rows || []);
-          setDrSourceYear(selectedAnnee);
-          return;
-        }
-        const fallback = await previsionApi.previsionsDr(selectedDr?.id || null, 2024);
-        setPrevisionsDr(fallback || []);
-        setDrSourceYear(2024);
+        setPrevisionsDr(rows || []);
+        setDrSourceYear((rows || []).length > 0 ? selectedAnnee : null);
       } catch (e) {
         console.error('Chargement DR:', e);
       }
@@ -166,13 +174,25 @@ const Prediction_Y = () => {
     : previsionsDr;
 
   // Préparer les données pour les charts
-  const annuelData = filteredPrevisionsAnnue;
-  const annuelLabels = [...new Set(annuelData.map(d => d.annee))].sort();
+  const annuelData = filteredPrevisionsAnnue.filter((row) => Number(row.annee) <= Number(selectedAnnee));
+  const annuelParAnnee = useMemo(() => {
+    const aggregation = new Map();
+    annuelData.forEach((row) => {
+      const annee = Number(row.annee);
+      const current = aggregation.get(annee) || { q10: 0, q50: 0, q90: 0 };
+      current.q10 += Number(row.q10) || 0;
+      current.q50 += Number(row.q50) || 0;
+      current.q90 += Number(row.q90) || 0;
+      aggregation.set(annee, current);
+    });
+    return aggregation;
+  }, [annuelData]);
+  const annuelLabels = [...annuelParAnnee.keys()].sort((a, b) => a - b);
   
   const annuelDatasets = [
     {
       label: 'Médiane (Q50)',
-      data: annuelLabels.map(y => annuelData.find(d => d.annee === y)?.q50 || 0),
+      data: annuelLabels.map(y => annuelParAnnee.get(y)?.q50 || 0),
       borderColor: chartColors.blue,
       backgroundColor: 'transparent',
       tension: 0.4,
@@ -181,7 +201,7 @@ const Prediction_Y = () => {
     },
     {
       label: 'Q10 (borne inf)',
-      data: annuelLabels.map(y => annuelData.find(d => d.annee === y)?.q10 || 0),
+      data: annuelLabels.map(y => annuelParAnnee.get(y)?.q10 || 0),
       borderColor: chartColors.teal,
       borderDash: [5, 5],
       backgroundColor: 'transparent',
@@ -190,7 +210,7 @@ const Prediction_Y = () => {
     },
     {
       label: 'Q90 (borne sup)',
-      data: annuelLabels.map(y => annuelData.find(d => d.annee === y)?.q90 || 0),
+      data: annuelLabels.map(y => annuelParAnnee.get(y)?.q90 || 0),
       borderColor: chartColors.amber,
       borderDash: [5, 5],
       backgroundColor: 'transparent',
@@ -287,6 +307,9 @@ const Prediction_Y = () => {
     };
   }, [yearlyRows, filteredPrevisionsAnnue, selectedAnnee, selectedCentre, selectedDr]);
 
+  const hasMensualForecast = mensuelSourceYear === selectedAnnee && previsionsMensuelles.length > 0;
+  const hasDrForecast = drSourceYear === selectedAnnee && previsionsDr.length > 0;
+
   // SHAP Global
   const shapFacteurs = shapGlobal?.facteurs || [];
 
@@ -342,7 +365,7 @@ const Prediction_Y = () => {
         y: { title: { display: true, text: 'Volume (m³)', color: '#8ba8cc', font: { size: 10 } } } 
       } 
     }
-  });
+  }, hasMensualForecast);
 
   // Chart: Taux de saturation mensuel
   useChart('saturationChart', {
@@ -371,7 +394,7 @@ const Prediction_Y = () => {
         y: { title: { display: true, text: 'Taux de saturation (%)', color: '#8ba8cc', font: { size: 10 } }, min: 0, max: 100 } 
       } 
     }
-  });
+  }, hasMensualForecast);
 
   // Chart: Capacité par DR
   useChart('drChart', {
@@ -392,7 +415,7 @@ const Prediction_Y = () => {
         y: { title: { display: true, text: 'Volume (m³)', color: '#8ba8cc', font: { size: 10 } } } 
       } 
     }
-  });
+  }, hasDrForecast);
 
   // Chart: SHAP Global
   useChart('shapChart', {
@@ -502,9 +525,9 @@ const Prediction_Y = () => {
             </div>
           </div>
 
-          {/* Filtre Cible SHAP */}
+          {/* Filtre de la prévision annuelle et des facteurs SHAP */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text2)' }}>Cible SHAP :</span>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text2)' }}>Indicateur :</span>
             <div style={{ position: 'relative', minWidth: '150px' }}>
               <button onClick={() => setIsCibleDropdownOpen(!isCibleDropdownOpen)} className="filter-button">
                 {CIBLE_OPTIONS.find(c => c.value === selectedCible)?.label || 'Distribution'} <ChevronDown size={14} />
@@ -528,6 +551,7 @@ const Prediction_Y = () => {
               {isAnneeDropdownOpen && (
                 <div className="dropdown-menu">
                   {ANNEE_OPTIONS.map(y => (<div key={y} onClick={() => { setSelectedAnnee(y); setIsAnneeDropdownOpen(false); }} className="dropdown-item">{y}</div>))}
+                  {ANNEE_OPTIONS.length === 0 && <div className="dropdown-empty">Chargement des années du modèle…</div>}
                 </div>
               )}
             </div>
@@ -537,7 +561,25 @@ const Prediction_Y = () => {
 
       {/* Graphique 1: Prévisions annuelles avec intervalle */}
       <div className="card">
-       
+        <div className="card-header">
+          <div>
+            <div className="card-title"><TrendingUp size={14} /> Prévision annuelle — modèle entraîné</div>
+            <div className="card-sub">{modelAnalysis.scope} · indicateur {CIBLE_OPTIONS.find(c => c.value === selectedCible)?.label} · jusqu’à {selectedAnnee}</div>
+          </div>
+          <div className="card-sub">{ANNEE_OPTIONS.length ? `Années disponibles dans le modèle : ${ANNEE_OPTIONS.join(', ')}` : 'Chargement des prévisions…'}</div>
+        </div>
+        {annuelLabels.length > 0 ? (
+          <>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', padding: '0 16px 12px' }}>
+              <div className="chip info">Q10 : {Math.round(modelAnalysis.q10 || 0).toLocaleString('fr-FR')} m³</div>
+              <div className="chip ok">Q50 : {Math.round(modelAnalysis.q50 || 0).toLocaleString('fr-FR')} m³</div>
+              <div className="chip warn">Q90 : {Math.round(modelAnalysis.q90 || 0).toLocaleString('fr-FR')} m³</div>
+            </div>
+            <canvas id="annuelChart" height="240" style={{ width: '100%', display: 'block' }}></canvas>
+          </>
+        ) : (
+          <div className="prediction-empty">Aucune prévision annuelle du modèle n’est disponible pour ce périmètre en {selectedAnnee}.</div>
+        )}
       </div>
 
       {/* Graphique 2: Volume mensuel vs capacité */}
@@ -548,11 +590,12 @@ const Prediction_Y = () => {
               <Droplets size={14} /> Volume cible mensuel vs capacité (m³)
             </div>
             {selectedDr && <div className="card-sub">DR: {selectedDr.name}</div>}
-              {mensuelSourceYear !== selectedAnnee && (
-                <div className="card-sub">Données mensuelles indisponibles en {selectedAnnee}, affichage basé sur {mensuelSourceYear}.</div>
-              )}
           </div>
-          <canvas id="mensuelChart" height="200" style={{ width: '100%', display: 'block' }}></canvas>
+          {hasMensualForecast ? (
+            <canvas id="mensuelChart" height="200" style={{ width: '100%', display: 'block' }}></canvas>
+          ) : (
+            <MonthlyForecastUnavailable year={selectedAnnee} onShow2024={() => setSelectedAnnee(2024)} />
+          )}
         </div>
       </div>
 
@@ -564,7 +607,11 @@ const Prediction_Y = () => {
               <Gauge size={14} /> Taux de saturation mensuel (%)
             </div>
           </div>
-          <canvas id="saturationChart" height="200" style={{ width: '100%', display: 'block' }}></canvas>
+          {hasMensualForecast ? (
+            <canvas id="saturationChart" height="200" style={{ width: '100%', display: 'block' }}></canvas>
+          ) : (
+            <MonthlyForecastUnavailable year={selectedAnnee} onShow2024={() => setSelectedAnnee(2024)} />
+          )}
         </div>
       </div>
 
@@ -575,11 +622,12 @@ const Prediction_Y = () => {
             <BarChart3 size={14} /> Capacité par DR
           </div>
           {selectedDr && <div className="card-sub">DR: {selectedDr.name}</div>}
-          {drSourceYear !== selectedAnnee && (
-            <div className="card-sub">Données DR indisponibles en {selectedAnnee}, affichage basé sur {drSourceYear}.</div>
-          )}
         </div>
-        <canvas id="drChart" height="200" style={{ width: '100%', display: 'block' }}></canvas>
+          {hasDrForecast ? (
+            <canvas id="drChart" height="200" style={{ width: '100%', display: 'block' }}></canvas>
+          ) : (
+            <MonthlyForecastUnavailable year={selectedAnnee} onShow2024={() => setSelectedAnnee(2024)} />
+          )}
       </div>
 
       {/* Section SHAP Global */}
@@ -734,6 +782,59 @@ const Prediction_Y = () => {
         
         .charts-row { margin-bottom: 20px; }
         .chart-wide { width: 100%; }
+        .prediction-empty {
+          margin: 0 16px 16px;
+          padding: 16px;
+          border-radius: 8px;
+          background: var(--bg2);
+          color: var(--text2);
+          font-size: 0.85rem;
+          line-height: 1.45;
+        }
+        .model-data-unavailable {
+          margin: 0 16px 16px;
+          padding: 18px;
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          border: 1px dashed #64748b;
+          border-radius: 10px;
+          background: linear-gradient(135deg, rgba(45, 139, 255, 0.08), rgba(0, 201, 167, 0.05));
+          color: var(--text);
+        }
+        .model-data-unavailable-icon {
+          display: grid;
+          place-items: center;
+          width: 36px;
+          height: 36px;
+          flex: 0 0 36px;
+          border-radius: 10px;
+          background: rgba(45, 139, 255, 0.16);
+          color: #2d8bff;
+        }
+        .model-data-unavailable-title {
+          margin-bottom: 5px;
+          font-size: 0.9rem;
+          font-weight: 700;
+        }
+        .model-data-unavailable-text {
+          max-width: 720px;
+          color: var(--text2);
+          font-size: 0.8rem;
+          line-height: 1.45;
+        }
+        .model-data-unavailable-action {
+          margin-top: 12px;
+          padding: 7px 10px;
+          border: 1px solid #2d8bff;
+          border-radius: 7px;
+          background: rgba(45, 139, 255, 0.1);
+          color: #2d8bff;
+          font-size: 0.78rem;
+          font-weight: 700;
+          cursor: pointer;
+        }
+        .model-data-unavailable-action:hover { background: rgba(45, 139, 255, 0.2); }
       `}</style>
     </div>
   );

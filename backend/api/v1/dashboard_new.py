@@ -1,6 +1,6 @@
 # backend/api/v1/dashboard_new.py - VERSION CORRIGÉE
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -68,11 +68,12 @@ async def get_master_timeseries(
     region: str = Query("all"),
     start_year: int = Query(2020),
     end_year: int = Query(2030),
+    zones: Optional[List[str]] = Query(None),
     service: DashboardNewService = Depends(get_dashboard_new_service)
 ):
     """Récupère les séries temporelles depuis master_panel"""
     region_param = None if region == "all" else int(region)
-    return await service._get_timeseries(region_param, start_year, end_year, "real")
+    return await service._get_timeseries(region_param, start_year, end_year, "real", zones)
 
 
 @router.get("/master/timeseries-detail")
@@ -80,44 +81,48 @@ async def get_master_timeseries_detail(
     region: str = Query("all"),
     start_year: int = Query(2020),
     end_year: int = Query(2030),
+    zones: Optional[List[str]] = Query(None),
     service: DashboardNewService = Depends(get_dashboard_new_service)
 ):
     """Récupère les séries détaillées depuis master_panel"""
     region_param = None if region == "all" else int(region)
-    return await service._get_timeseries_detail(region_param, start_year, end_year, "real")
+    return await service._get_timeseries_detail(region_param, start_year, end_year, "real", zones)
 
 
 @router.get("/master/stats")
 async def get_master_stats(
     region: str = Query("all"),
     year: int = Query(2024),
+    zones: Optional[List[str]] = Query(None),
     service: DashboardNewService = Depends(get_dashboard_new_service)
 ):
     """Récupère les statistiques depuis master_panel"""
     region_param = None if region == "all" else int(region)
-    return await service._get_statistics(region_param, year)
+    return await service._get_statistics(region_param, year, zones)
 
 
 @router.get("/master/bilan/zones")
 async def get_master_bilan_zones(
     region: str = Query("all"),
     year: int = Query(2024),
+    zones: Optional[List[str]] = Query(None),
     service: DashboardNewService = Depends(get_dashboard_new_service)
 ):
     """Récupère le bilan par zone depuis master_panel"""
     region_param = None if region == "all" else int(region)
-    return await service._get_bilan_by_zone(region_param, year)
+    return await service._get_bilan_by_zone(region_param, year, zones)
 
 
 @router.get("/master/bilan/provinces")
 async def get_master_bilan_provinces(
     region: str = Query("all"),
     year: int = Query(2024),
+    zones: Optional[List[str]] = Query(None),
     service: DashboardNewService = Depends(get_dashboard_new_service)
 ):
     """Récupère le bilan par province depuis master_panel"""
     region_param = None if region == "all" else int(region)
-    return await service._get_bilan_by_province(region_param, year)
+    return await service._get_bilan_by_province(region_param, year, zones)
 
 
 @router.get("/master/bilan/regions")
@@ -132,51 +137,51 @@ async def get_master_bilan_regions(
 @router.get("/master/rendements")
 async def get_master_rendements(
     region: str = Query("all"),
+    year: int = Query(2024, ge=2000, le=2100),
+    zones: Optional[List[str]] = Query(None),
     service: DashboardNewService = Depends(get_dashboard_new_service)
 ):
     """Récupère les rendements depuis master_panel"""
     region_param = None if region == "all" else int(region)
-    return await service._get_rendements(region_param)
+    return await service._get_rendements(region_param, year, zones)
 
 
 @router.get("/master/alerts")
 async def get_master_alerts(
     region: str = Query("all"),
+    year: int = Query(2024, ge=2000, le=2100),
     service: DashboardNewService = Depends(get_dashboard_new_service)
 ):
     """Récupère les alertes depuis master_panel"""
     region_param = None if region == "all" else int(region)
-    return await service._get_alerts(region_param)
+    return await service._get_alerts(region_param, year)
 
 
 @router.get("/master/vulnerability")
 async def get_master_vulnerability(
     region: str = Query("all"),
+    year: int = Query(2024, ge=2000, le=2100),
+    zones: Optional[List[str]] = Query(None),
     service: DashboardNewService = Depends(get_dashboard_new_service)
 ):
     """Récupère les indicateurs de vulnérabilité réseau"""
     region_param = None if region == "all" else int(region)
-    return await service._get_vulnerability(region_param)
+    return await service._get_vulnerability(region_param, year, zones)
 
 
 @router.get("/master/centres")
 async def get_master_centres(
     region: str = Query("all"),
+    year: int = Query(2024, ge=2000, le=2100),
+    zones: Optional[List[str]] = Query(None),
     service: DashboardNewService = Depends(get_dashboard_new_service)
 ):
     """Récupère la liste des centres depuis master_panel"""
     region_param = None if region == "all" else int(region)
-    payload = await service._get_centres(region_param)
-    blocking_issues = payload.get("blocking_issues") or []
-    if blocking_issues:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "BLOCKING_DATA_QUALITY",
-                "message": "Des anomalies bloquantes ont ete detectees dans les capacites installations.",
-                "issues": blocking_issues,
-            },
-        )
+    payload = await service._get_centres(region_param, year, zones)
+    # Les anomalies d'installation sont retournées avec les données : elles ne
+    # doivent pas masquer les centres ni provoquer le repli vers une ancienne
+    # route aux unités différentes.
     return payload
 
 
@@ -190,11 +195,12 @@ async def get_consommation_by_type(
     region: str = Query("all"),
     start_year: int = Query(2020),
     end_year: int = Query(2030),
+    zones: Optional[List[str]] = Query(None),
     service: ConsumptionNewService = Depends(get_consumption_new_service)
 ):
     """Récupère la consommation par type depuis fact_long"""
     region_param = None if region == "all" else int(region)
-    return await service.get_consommation_by_type(centre_id, region_param, start_year, end_year)
+    return await service.get_consommation_by_type(centre_id, region_param, start_year, end_year, zones)
 
 
 @router.get("/consommation/totale")
@@ -252,8 +258,8 @@ async def get_centres_by_region(
                 mp.distribution,
                 mp.cons_pop_branchee as consommation,
                 CASE 
-                    WHEN mp.rend_distribution < 70 THEN 'deficit'
-                    WHEN mp.rend_distribution < 85 THEN 'warn'
+                    WHEN (CASE WHEN mp.rend_distribution <= 1 THEN mp.rend_distribution * 100 ELSE mp.rend_distribution END) < 70 THEN 'deficit'
+                    WHEN (CASE WHEN mp.rend_distribution <= 1 THEN mp.rend_distribution * 100 ELSE mp.rend_distribution END) < 85 THEN 'warn'
                     ELSE 'ok'
                 END as status
             FROM master_panel mp
@@ -283,8 +289,8 @@ async def get_centres_by_region(
                 mp.distribution,
                 mp.cons_pop_branchee as consommation,
                 CASE 
-                    WHEN mp.rend_distribution < 70 THEN 'deficit'
-                    WHEN mp.rend_distribution < 85 THEN 'warn'
+                    WHEN (CASE WHEN mp.rend_distribution <= 1 THEN mp.rend_distribution * 100 ELSE mp.rend_distribution END) < 70 THEN 'deficit'
+                    WHEN (CASE WHEN mp.rend_distribution <= 1 THEN mp.rend_distribution * 100 ELSE mp.rend_distribution END) < 85 THEN 'warn'
                     ELSE 'ok'
                 END as status
             FROM master_panel mp

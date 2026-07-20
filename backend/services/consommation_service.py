@@ -259,6 +259,9 @@ class ConsommationService:
                 continue
             pred_by_centre_year[(cid, int(an))] = float(q50) / 1_000_000
 
+        annees_modele = sorted({annee for _, annee in pred_by_centre_year.keys()})
+        annee_reference = annees_modele[0] if annees_modele else year
+
         def _get_center_year_value(cid: str, target_year: int) -> float:
             key = (cid, int(target_year))
             if key in real_by_centre_year:
@@ -269,9 +272,8 @@ class ConsommationService:
         for row in meta_rows:
             cid = str(row.id)
             conso_selected = _get_center_year_value(cid, year)
-            conso_2027 = _get_center_year_value(cid, 2027)
-            conso_2030 = _get_center_year_value(cid, 2030)
-            variation = ((conso_2030 - conso_selected) / conso_selected * 100) if conso_selected > 0 else 0
+            conso_reference = _get_center_year_value(cid, annee_reference)
+            variation = ((conso_selected - conso_reference) / conso_reference * 100) if conso_reference > 0 else 0
 
             if row.rend_distribution and row.rend_distribution < 70:
                 status = "deficit"
@@ -288,8 +290,9 @@ class ConsommationService:
                 "name": row.name,
                 "province": row.province,
                 "conso2024": round(conso_selected, 3),
-                "conso2027": round(conso_2027, 3),
-                "conso2030": round(conso_2030, 3),
+                "conso_selected": round(conso_selected, 3),
+                "conso_reference": round(conso_reference, 3),
+                "annee_reference": annee_reference,
                 "variation": f"+{round(variation, 1)}%" if variation > 0 else f"{round(variation, 1)}%",
                 "status": status,
                 "statusText": statusText,

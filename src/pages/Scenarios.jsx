@@ -7,6 +7,7 @@ import { TrendingUp, TrendingDown, AlertTriangle, CheckCircle, BarChart3, Settin
 
 const fmtM = (v) => (v / 1e6).toLocaleString('fr-FR', { maximumFractionDigits: 1 });
 const yearlyM3ToLs = (m3PerYear) => (m3PerYear * 1000) / (365 * 24 * 3600);
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const CIBLES = [
   { id: 'consommation_totale', label: 'Consommation totale', icon: Droplets },
@@ -52,7 +53,9 @@ const PRESETS = [
     leviers: ['+1740 l/s', '≈ 4,58 Mm³/mois', 'Hors patrimoine ONEE'],
     decision: "mesurer le gain de sécurité d'approvisionnement.",
     params: { cible: 'production', capacite_additionnelle_m3: 4576000,
-              capacite_additionnelle_libelle: 'Dessalement Agadir (1740 l/s)', annee_mensuel: 2024 },
+              capacite_additionnelle_ulterieure_m3: 1916667,
+              annee_debut_capacite_ulterieure: 2030,
+              capacite_additionnelle_libelle: 'Dessalement Agadir existant (1740 l/s) + projet 23 Mm³/an', annee_mensuel: 2024 },
   },
   {
     id: 'pilot-zones', color: '#6366f1', icon: Rocket,
@@ -76,6 +79,43 @@ const PRESETS = [
 const PILOT_PRESET_IDS = new Set(['taroudant', 'larache', 'agadir']);
 const PRESETS_OVERVIEW = PRESETS.filter((preset) => !PILOT_PRESET_IDS.has(preset.id));
 
+// Modèles décisionnels du blueprint : ils représentent des questions de
+// planification réelles, pas des exemples arbitraires.
+const BLUEPRINT_PRESETS = [
+  {
+    id: 'secheresse-3-ans', color: '#dc2626', icon: AlertTriangle,
+    categorie: 'Choc · ressource', titre: 'Sécheresse sur trois ans',
+    contexte: 'Réduction de la ressource exploitable afin de mesurer l’année où la capacité ne couvre plus le besoin.',
+    leviers: ['Ressource −20 % (2024–2026)', 'Horizon 2035'],
+    decision: 'Prioriser les systèmes dont le déficit apparaît le plus tôt.',
+    params: { cible: 'production', stress_ressource_pct: 20, annee_debut_stress: 2024, duree_stress_ans: 3, annee_horizon: 2035, annee_mensuel: 2024 },
+  },
+  {
+    id: 'reduction-pertes', color: '#10b981', icon: CheckCircle,
+    categorie: 'Efficacité · réseau', titre: 'Programme de réduction des pertes',
+    contexte: 'Amélioration du rendement de distribution pour comparer l’efficacité réseau à un investissement de capacité.',
+    leviers: ['Rendement distribution 85 %', 'Horizon 2035'],
+    decision: 'Mesurer le déficit évité par la réduction des pertes.',
+    params: { cible: 'production', rendement_distribution: 85, annee_horizon: 2035, annee_mensuel: 2024 },
+  },
+  {
+    id: 'hausse-touristique', color: '#f59e0b', icon: TrendingUp,
+    categorie: 'Demande · fréquentation', titre: 'Hausse de fréquentation touristique',
+    contexte: 'Hausse annuelle de la demande, à décliner par mois lorsque le profil touristique local sera disponible.',
+    leviers: ['Demande annuelle +12 %', 'Horizon 2035'],
+    decision: 'Vérifier si la marge disponible absorbe le pic de demande.',
+    params: { cible: 'consommation_totale', tourisme_pct: 12, annee_horizon: 2035, annee_mensuel: 2024 },
+  },
+  {
+    id: 'nouvelle-zone-industrielle', color: '#6366f1', icon: Factory,
+    categorie: 'Demande · développement', titre: 'Nouvelle zone industrielle',
+    contexte: 'Ajout d’un besoin industriel à partir d’une date de mise en service définie.',
+    leviers: ['+3 Mm³/an dès 2030', 'Horizon 2038'],
+    decision: 'Dimensionner la ressource avant la mise en service de la zone.',
+    params: { cible: 'consommation_totale', industrie_m3_an: 3000000, annee_debut_industrie: 2030, annee_horizon: 2038, annee_mensuel: 2024 },
+  },
+];
+
 const PILOT_ZONES = [
   {
     id: 'taroudant-2026',
@@ -88,6 +128,13 @@ const PILOT_ZONES = [
     title: 'Taroudant — phase 2026',
     subtitle: 'Intégration progressive de centres',
     note: 'Centres alimentés progressivement à partir de 2026',
+    dataNote: 'Les historiques et prévisions de ces centres doivent être intégrés avant simulation.',
+    inputs: [
+      ['Mise en service', '2026'],
+      ['Croissance annuelle', '2,4 %'],
+      ['Horizon de calcul', '2038'],
+      ['Rendements et branchement', 'Moyennes des centres'],
+    ],
     centres: [
       { id: '09.541.05.01', name: 'Ahl Ramel' },
       { id: '09.541.04.09', name: 'Arazane' },
@@ -107,6 +154,13 @@ const PILOT_ZONES = [
     title: 'Taroudant — phase 2028',
     subtitle: 'Raccordement complémentaire',
     note: 'Centres alimentés progressivement à partir de 2028',
+    dataNote: 'Les historiques et prévisions de ces centres doivent être intégrés avant simulation.',
+    inputs: [
+      ['Mise en service', '2028'],
+      ['Croissance annuelle', '3,2 %'],
+      ['Horizon de calcul', '2045'],
+      ['Rendements et branchement', 'Moyennes des centres'],
+    ],
     centres: [
       { id: '09.541.07.09', name: 'Assaki' },
       { id: '09.541.07.11', name: 'Azrar' },
@@ -125,8 +179,14 @@ const PILOT_ZONES = [
     title: 'Agadir',
     subtitle: 'Station de dessalement projetée',
     note: 'Dessalement 23 Mm³/an projeté à partir de 2030 + intégration de la station existante (1740 l/s).',
+    inputs: [
+      ['Capacité existante', '1 740 l/s (4,576 Mm³/mois)'],
+      ['Capacité future', '23 Mm³/an'],
+      ['Mise en service future', '2030'],
+    ],
     centres: [
       { id: '0427305273', name: 'Temsia' },
+      // L'identifiant exploitable dans les données de prévision est 0416307273.
       { id: '0416307273', name: 'Sidi Bibi' },
     ],
   },
@@ -142,6 +202,13 @@ const PILOT_ZONES = [
     title: 'Larache',
     subtitle: 'Extension LOUKKOUS / dessalement / appui Tanger',
     note: 'Étude de renforcement de la ressource (LOUKKOUS, dessalement local, et transfert potentiel depuis Tanger 150 Mm³/an).',
+    dataNote: 'Les projets doivent être associés aux centres de desserte et à leurs prévisions avant simulation.',
+    inputs: [
+      ['Baisse des forages', '−15 %'],
+      ['LOUKKOUS', '660 + 330 l/s'],
+      ['Renforcement modélisé', '+330 l/s (0,868 Mm³/mois)'],
+      ['Transfert Tanger potentiel', '150 Mm³/an'],
+    ],
     centres: [
       { id: '01.234.56789', name: 'LOUKKOUS' },
       { id: '01.234.56790', name: 'Dessalement local' },
@@ -268,8 +335,9 @@ function Slider({ label, min, max, step, value, set, suffix = '', icon: Icon }) 
   );
 }
 
-export default function Scenarios() {
+export default function Scenarios({ view = 'prepared' }) {
   const [centres, setCentres] = useState([]);
+  const [installations, setInstallations] = useState([]);
   const [cible, setCible] = useState('consommation_totale');
   const [centreId, setCentreId] = useState('');
   const [taux, setTaux] = useState(3);
@@ -280,13 +348,26 @@ export default function Scenarios() {
   const [deltaCap, setDeltaCap] = useState(0);
   const [capAdd, setCapAdd] = useState(0);
   const [capAddLib, setCapAddLib] = useState('');
+  const [installation, setInstallation] = useState('');
+  const [capaciteAbsolue, setCapaciteAbsolue] = useState(0);
+  const [capAddFuture, setCapAddFuture] = useState(0);
+  const [capAddFutureYear, setCapAddFutureYear] = useState(2030);
   const [activePreset, setActivePreset] = useState(null);
   const [res, setRes] = useState(null);
   const [erreur, setErreur] = useState(null);
   const [charge, setCharge] = useState(false);
-  const [activeTab, setActiveTab] = useState('presets');
+  const [activeTab, setActiveTab] = useState(view === 'advanced' ? 'custom' : 'presets');
   const [growthLow, setGrowthLow] = useState(1.5);
   const [growthHigh, setGrowthHigh] = useState(4.5);
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
+  const [chargementParametres, setChargementParametres] = useState(false);
+  const [infoParametres, setInfoParametres] = useState('');
+
+  useEffect(() => {
+    setActiveTab(view === 'advanced' ? 'custom' : 'presets');
+    setRes(null);
+    setErreur(null);
+  }, [view]);
   
   // États pour les barres de recherche des options
   const [cibleSearch, setCibleSearch] = useState('');
@@ -295,6 +376,7 @@ export default function Scenarios() {
 
   const chartRef = useRef(null);
   const chart = useRef(null);
+  const baselineInitialisee = useRef(false);
 
   // Filtrer les CIBLES
   const filteredCibles = useMemo(() => {
@@ -327,6 +409,10 @@ export default function Scenarios() {
       else if (d.statut === 'tension') nTension++;
     });
     let deltaPct = 0, demandeScn = 0, horizonAnnee = null;
+    const params = res?.parametres || {};
+    const demandeIndustrielle = Number(params.industrie_m3_an || 0);
+    const rendementCible = params.rendement_distribution;
+    const stressRessource = Number(params.stress_ressource_pct || 0);
     const capaciteAdditionnelle = res?.bilan?.capacite_additionnelle_m3 || 0;
     const capaciteAdditionnelleLibelle = res?.bilan?.capacite_additionnelle_libelle || '';
     if (a && a.annees && a.annees.length) {
@@ -343,6 +429,29 @@ export default function Scenarios() {
         titre: 'Capacité insuffisante',
         texte: `Ce scénario laisse un déficit de ${fmtM(deficit)} Mm³/mois sur ${nDeficit} zone(s). Un renforcement de la production est nécessaire avant l'échéance.`,
         action: 'Plan de renforcement prioritaire'
+      };
+    } else if (demandeIndustrielle > 0) {
+      v = {
+        ton: 'warn',
+        titre: 'Nouvelle demande industrielle à intégrer',
+        texte: `Le scénario ajoute ${fmtM(demandeIndustrielle)} Mm³/an dès ${params.annee_debut_industrie}. Même si la couverture reste suffisante, ce besoin doit être intégré au dimensionnement de la ressource et du réseau.`,
+        action: 'Planifier la ressource avant la mise en service'
+      };
+    } else if (rendementCible != null && params.cible === 'production' && Math.abs(deltaPct) >= 0.1) {
+      v = {
+        ton: 'ok',
+        titre: 'Efficacité réseau améliorée',
+        texte: `Le volume annuel à mobiliser diminue de ${Math.abs(deltaPct).toFixed(1)} % grâce au rendement de distribution cible de ${rendementCible} %. La consommation des usagers n'est pas réduite par ce levier.`,
+        action: 'Valider le programme de réduction des pertes'
+      };
+    } else if (stressRessource > 0) {
+      const debut = params.annee_debut_stress || 'la première année';
+      const duree = params.duree_stress_ans || 1;
+      v = {
+        ton: 'warn',
+        titre: 'Stress hydrique testé',
+        texte: `La capacité exploitable est réduite de ${stressRessource} % pendant ${duree} an(s), à partir de ${debut}. Le bilan annuel identifie directement toute année de rupture sur cette période.`,
+        action: 'Préparer un plan de continuité pour la période de stress'
       };
     } else if (m && m.n_saturees_scenario < m.n_saturees_baseline) {
       v = {
@@ -397,7 +506,43 @@ export default function Scenarios() {
     previsionApi.centres()
       .then(setCentres)
       .catch(e => setErreur('Backend injoignable sur le port 8000. ' + e.message));
+    previsionApi.installations().then(setInstallations)
+      .catch(() => setInstallations([]));
   }, []);
+
+  const installationSelectionnee = useMemo(
+    () => installations.find((item) => item.id === installation),
+    [installations, installation]
+  );
+
+  async function selectionnerCentre(id) {
+    setCentreId(id);
+    setActivePreset(null);
+    setInfoParametres('');
+
+    if (!id) return;
+
+    setChargementParametres(true);
+    try {
+      const valeurs = await previsionApi.parametresCentre(id);
+      // On ne remplace un curseur que lorsqu'une moyenne historique existe.
+      // L'utilisateur peut toujours modifier ces valeurs après le préremplissage.
+      if (valeurs.taux_accroissement !== null) setTaux(clamp(valeurs.taux_accroissement, -5, 15));
+      if (valeurs.rendement_distribution !== null) setRendDist(clamp(valeurs.rendement_distribution, 30, 95));
+      if (valeurs.rendement_adduction !== null) setRendAdd(clamp(valeurs.rendement_adduction, 60, 100));
+      if (valeurs.taux_branchement !== null) setBranch(clamp(valeurs.taux_branchement, 5, 100));
+
+      setInfoParametres(
+        valeurs.nb_lignes_historique
+          ? `Paramètres préremplis par les moyennes historiques (${valeurs.nb_lignes_historique} année(s)).`
+          : 'Aucune donnée historique disponible pour ce centre : les valeurs actuelles sont conservées.'
+      );
+    } catch (e) {
+      setInfoParametres('Impossible de charger les moyennes du centre : les valeurs actuelles sont conservées.');
+    } finally {
+      setChargementParametres(false);
+    }
+  }
 
   useEffect(() => {
     return () => { 
@@ -414,7 +559,6 @@ export default function Scenarios() {
     const scenarioData = a.scenario?.q50 || [];
     const q90Data = a.scenario?.q90 || [];
     const baseGrowthPct = Number(a?.hypotheses?.croissance_base_pct ?? 1.8);
-    const scenarioGrowthPct = Number(a?.hypotheses?.croissance_scenario_pct ?? taux);
 
     const buildCurve = (targetGrowthPct) => {
       const gBase = baseGrowthPct / 100;
@@ -432,9 +576,9 @@ export default function Scenarios() {
       years,
       baselineData,
       scenarioData,
+      q10Data: a.baseline?.q10 || [],
       q90Data,
       baseGrowthPct,
-      scenarioGrowthPct,
       lowCurve: buildCurve(growthLow),
       highCurve: buildCurve(growthHigh),
     };
@@ -443,26 +587,41 @@ export default function Scenarios() {
   const annualBalance = useMemo(() => {
     if (!annualComparison) return null;
 
+    const params = res?.parametres || {};
     const capBaselineFromMensuel = (res?.mensuel?.capacite_baseline || []).reduce((s, v) => s + (Number(v) || 0), 0);
-    const capScenarioFromMensuel = (res?.mensuel?.capacite_scenario || []).reduce((s, v) => s + (Number(v) || 0), 0);
 
     const capScenarioFromBilan = (res?.bilan?.par_dr || []).reduce((s, z) => s + (Number(z?.capacite) || 0), 0);
-    const deltaPct = Number(res?.bilan?.delta_capacite_pct || 0);
+    const deltaEffectifPct = Number(res?.bilan?.delta_capacite_pct || 0);
+    const deltaManuelPct = Number(params.delta_capacite_pct || 0);
+    const stressPct = Number(params.stress_ressource_pct || 0);
+    const maintenancePct = Number(params.maintenance_pct || 0);
     const capAdd = Number(res?.bilan?.capacite_additionnelle_m3 || 0);
-    const factor = 1 + (deltaPct / 100);
+    const capAddFuture = Number(res?.bilan?.capacite_additionnelle_ulterieure_m3 || 0);
+    const capAddFutureYear = Number(res?.bilan?.annee_debut_capacite_ulterieure || Infinity);
+    const factor = 1 + (deltaEffectifPct / 100);
     const capBaselineFromBilan = factor > 0
       ? Math.max(0, (capScenarioFromBilan - capAdd) / factor)
       : Math.max(0, capScenarioFromBilan - capAdd);
 
-    const capScenarioAnnual = capScenarioFromMensuel > 0 ? capScenarioFromMensuel : capScenarioFromBilan;
     const capBaselineAnnual = capBaselineFromMensuel > 0 ? capBaselineFromMensuel : capBaselineFromBilan;
     const years = annualComparison.years || [];
+    const premiereAnnee = years[0] || Number(params.annee_mensuel) || new Date().getFullYear();
+    const debutStress = Number(params.annee_debut_stress || premiereAnnee);
+    const dureeStress = stressPct > 0 ? Number(params.duree_stress_ans || 1) : 0;
+    const finStress = dureeStress > 0 ? debutStress + dureeStress - 1 : null;
 
     const rows = years.map((year, idx) => {
       const besoinScenario = Number(annualComparison.scenarioData?.[idx] || 0);
       const besoinReference = Number(annualComparison.baselineData?.[idx] || 0);
       const capaciteReference = capBaselineAnnual;
-      const capaciteScenario = capScenarioAnnual;
+      const stressActif = finStress !== null && year >= debutStress && year <= finStress;
+      const deltaAnnee = deltaManuelPct - (stressActif ? stressPct : 0) - maintenancePct;
+      // En l'absence de plan de capacité par année, la capacité de référence
+      // est maintenue constante. Les chocs et mises en service déclarés, eux,
+      // sont positionnés dans le temps.
+      const capaciteScenario = Math.max(0, capaciteReference * (1 + deltaAnnee / 100))
+        + capAdd * 12
+        + (year >= capAddFutureYear ? capAddFuture * 12 : 0);
       const ecartScenario = capaciteScenario - besoinScenario;
       const deficitScenario = Math.max(0, -ecartScenario);
       const tauxDeficit = besoinScenario > 0 ? (deficitScenario / besoinScenario) * 100 : 0;
@@ -482,6 +641,12 @@ export default function Scenarios() {
     const firstDeficit = rows.find((r) => r.deficitScenario > 0);
     const firstBaselineDeficit = rows.find((r) => r.besoinReference > r.capaciteReference);
     const firstScenarioDeficit = rows.find((r) => r.besoinScenario > r.capaciteScenario);
+    const rowsSousStress = finStress === null
+      ? []
+      : rows.filter((row) => row.annee >= debutStress && row.annee <= finStress);
+    const pointCritique = rowsSousStress.length > 0
+      ? rowsSousStress.reduce((plusFaible, row) => (!plusFaible || row.ecartScenario < plusFaible.ecartScenario ? row : plusFaible), null)
+      : (rows[rows.length - 1] || null);
     const shiftYears = firstBaselineDeficit && firstScenarioDeficit
       ? firstScenarioDeficit.annee - firstBaselineDeficit.annee
       : null;
@@ -491,13 +656,19 @@ export default function Scenarios() {
 
     return {
       rows,
+      horizonRow: rows[rows.length - 1] || null,
       capBaselineAnnual,
-      capScenarioAnnual,
+      capScenarioAnnual: rows[rows.length - 1]?.capaciteScenario || 0,
       firstDeficitYear: firstDeficit?.annee || null,
       reinforcementYearlyM3,
       reinforcementLs,
       firstBaselineDeficitYear: firstBaselineDeficit?.annee || null,
       shiftYears,
+      pointCritique,
+      debutStress: stressPct > 0 ? debutStress : null,
+      finStress,
+      capaciteReferenceConstante: true,
+      hasCapacityVariation: stressPct > 0 || maintenancePct > 0 || deltaManuelPct !== 0 || capAdd > 0 || capAddFuture > 0,
     };
   }, [annualComparison, res]);
 
@@ -528,12 +699,21 @@ export default function Scenarios() {
       taux_accroissement: taux, rendement_distribution: rendDist,
       rendement_adduction: rendAdd, taux_branchement: branch,
       annee_horizon: horizon, annee_mensuel: 2024,
+      installation: installation || null,
       delta_capacite_pct: deltaCap || null,
+      capacite_absolue: installation && capaciteAbsolue > 0 ? capaciteAbsolue : null,
       capacite_additionnelle_m3: capAdd || null,
       capacite_additionnelle_libelle: capAddLib || null,
+      capacite_additionnelle_ulterieure_m3: capAddFuture || null,
+      annee_debut_capacite_ulterieure: capAddFuture > 0 ? capAddFutureYear : null,
     };
     try {
       const result = await previsionApi.scenario(body);
+      if (!result.annuel && Array.isArray(body.centre_ids) && body.centre_ids.length > 0) {
+        setErreur("Les centres sélectionnés ne disposent pas encore d'historique ni de prévisions dans les données livrées. Aucun regroupement national n'a été utilisé.");
+        setRes(null);
+        return;
+      }
       setRes(result);
     } catch (e) {
       setErreur(e.message);
@@ -541,6 +721,21 @@ export default function Scenarios() {
     }
     setCharge(false);
   }
+
+  // Le blueprint impose une page utile dès son ouverture : la référence est
+  // donc calculée automatiquement, sans attendre le clic sur un modèle.
+  useEffect(() => {
+    if (view !== 'prepared' || baselineInitialisee.current) return;
+    baselineInitialisee.current = true;
+    lancer({
+      cible: 'consommation_totale', centre_id: null, centre_ids: [],
+      taux_accroissement: null, rendement_distribution: null,
+      rendement_adduction: null, taux_branchement: null,
+      annee_horizon: 2035, annee_mensuel: 2024,
+      delta_capacite_pct: null, capacite_additionnelle_m3: null,
+      capacite_additionnelle_libelle: null,
+    });
+  }, [view]);
 
   function appliquerPreset(p) {
     const x = p.params;
@@ -553,6 +748,8 @@ export default function Scenarios() {
     setDeltaCap(x.delta_capacite_pct ?? 0);
     setCapAdd(x.capacite_additionnelle_m3 ?? 0);
     setCapAddLib(x.capacite_additionnelle_libelle ?? '');
+    setCapAddFuture(x.capacite_additionnelle_ulterieure_m3 ?? 0);
+    setCapAddFutureYear(x.annee_debut_capacite_ulterieure ?? 2030);
     setCentreId('');
     setActivePreset(p.id);
     lancer({
@@ -566,6 +763,47 @@ export default function Scenarios() {
       delta_capacite_pct: x.delta_capacite_pct ?? null,
       capacite_additionnelle_m3: x.capacite_additionnelle_m3 ?? null,
       capacite_additionnelle_libelle: x.capacite_additionnelle_libelle ?? null,
+      capacite_additionnelle_ulterieure_m3: x.capacite_additionnelle_ulterieure_m3 ?? null,
+      annee_debut_capacite_ulterieure: x.annee_debut_capacite_ulterieure ?? null,
+      centre_ids: x.centre_ids ?? [],
+      dotation_pct: x.dotation_pct ?? null,
+      tourisme_pct: x.tourisme_pct ?? null,
+      industrie_m3_an: x.industrie_m3_an ?? null,
+      annee_debut_industrie: x.annee_debut_industrie ?? null,
+      stress_ressource_pct: x.stress_ressource_pct ?? null,
+      annee_debut_stress: x.annee_debut_stress ?? null,
+      duree_stress_ans: x.duree_stress_ans ?? null,
+      maintenance_pct: x.maintenance_pct ?? null,
+    });
+  }
+
+  function simulerZonePilote(zone) {
+    const centreIdsDisponibles = new Set(centres.map((centre) => centre.id));
+    const centresIndisponibles = zone.centres.filter(
+      (centre) => centres.length > 0 && !centreIdsDisponibles.has(centre.id),
+    );
+
+    if (centresIndisponibles.length > 0) {
+      setRes(null);
+      setErreur(
+        `Le pilote « ${zone.title} » ne peut pas encore être simulé : ${centresIndisponibles
+          .map((centre) => `${centre.name} (${centre.id})`)
+          .join(', ')} ne figure pas dans les données de prévision livrées.`,
+      );
+      return;
+    }
+
+    const preset = PRESETS.find((p) => p.id === zone.presetId);
+    if (!preset) return;
+
+    appliquerPreset({
+      ...preset,
+      id: zone.id,
+      params: {
+        ...preset.params,
+        ...(zone.paramsOverride || {}),
+        centre_ids: zone.centres.map((centre) => centre.id),
+      },
     });
   }
 
@@ -577,13 +815,14 @@ export default function Scenarios() {
       years,
       baselineData,
       scenarioData,
+      q10Data,
       q90Data,
-      scenarioGrowthPct,
       lowCurve,
       highCurve,
     } = annualComparison;
     const capBaselineLine = years.map(() => annualBalance?.capBaselineAnnual || 0);
-    const capScenarioLine = years.map(() => annualBalance?.capScenarioAnnual || 0);
+    const capScenarioLine = annualBalance?.rows?.map((row) => row.capaciteScenario)
+      || years.map(() => 0);
     const intersectionIdx = annualBalance?.firstDeficitYear
       ? years.findIndex((y) => y === annualBalance.firstDeficitYear)
       : -1;
@@ -594,6 +833,13 @@ export default function Scenarios() {
       data: {
         labels: years,
         datasets: [
+          {
+            label: 'Borne basse de l’incertitude',
+            data: q10Data,
+            borderColor: 'transparent',
+            pointRadius: 0,
+            fill: false
+          },
           {
             label: 'Référence',
             data: baselineData,
@@ -612,7 +858,7 @@ export default function Scenarios() {
             fill: '-1'
           },
           {
-            label: `Scénario (${scenarioGrowthPct.toFixed(1)} %/an)`,
+            label: 'Scénario simulé',
             data: scenarioData,
             borderColor: '#f59e0b',
             borderWidth: 2,
@@ -628,10 +874,13 @@ export default function Scenarios() {
             borderWidth: 2,
             borderDash: [4, 3],
             pointRadius: 0,
-            fill: false
+            fill: false,
+            hidden: true
           },
           {
-            label: 'Capacité annuelle scénario',
+            label: annualBalance?.hasCapacityVariation
+              ? 'Capacité exploitable simulée'
+              : 'Capacité de référence 2024 (hypothèse constante)',
             data: capScenarioLine,
             borderColor: '#16a34a',
             borderWidth: 2,
@@ -658,7 +907,8 @@ export default function Scenarios() {
             borderDash: [3, 4],
             tension: 0.3,
             pointRadius: 0,
-            fill: false
+            fill: false,
+            hidden: true
           },
           {
             label: `Hypothèse haute (${growthHigh.toFixed(1)} %/an)`,
@@ -668,7 +918,8 @@ export default function Scenarios() {
             borderDash: [2, 5],
             tension: 0.3,
             pointRadius: 0,
-            fill: false
+            fill: false,
+            hidden: true
           },
         ]
       },
@@ -678,7 +929,13 @@ export default function Scenarios() {
         plugins: {
           legend: {
             position: 'top',
-            labels: { boxWidth: 10, font: { size: 11, weight: '500' }, color: '#4b5563' }
+            labels: {
+              filter: (item) => ![0, 4, 7, 8].includes(item.datasetIndex)
+                && (item.datasetIndex !== 6 || Boolean(annualBalance?.firstDeficitYear)),
+              boxWidth: 10,
+              font: { size: 11, weight: '500' },
+              color: '#4b5563'
+            },
           },
           tooltip: {
             callbacks: { 
@@ -713,22 +970,52 @@ export default function Scenarios() {
     }
   };
 
+  // La référence correspond au scénario sans levier. Pour chaque carte, on
+  // expose uniquement les hypothèses effectivement transmises au moteur.
+  const activeScenario = BLUEPRINT_PRESETS.find((preset) => preset.id === activePreset);
+  const parametresAppliques = res?.parametres || {};
+  const hypotheseTrace = [
+    Number(parametresAppliques.stress_ressource_pct || 0) > 0
+      ? `Ressource exploitable −${parametresAppliques.stress_ressource_pct} % (${parametresAppliques.annee_debut_stress || 2024}–${(parametresAppliques.annee_debut_stress || 2024) + (parametresAppliques.duree_stress_ans || 1) - 1})`
+      : null,
+    Number(parametresAppliques.maintenance_pct || 0) > 0
+      ? `Indisponibilité maintenance −${parametresAppliques.maintenance_pct} %`
+      : null,
+    Number(parametresAppliques.stress_ressource_pct || 0) === 0
+      && Number(parametresAppliques.maintenance_pct || 0) === 0
+      && Number(parametresAppliques.delta_capacite_pct || 0) !== 0
+      ? `Capacité ${Number(parametresAppliques.delta_capacite_pct) > 0 ? '+' : ''}${parametresAppliques.delta_capacite_pct} %`
+      : null,
+    Number(parametresAppliques.tourisme_pct || 0) > 0
+      ? `Demande touristique +${parametresAppliques.tourisme_pct} %`
+      : null,
+    Number(parametresAppliques.industrie_m3_an || 0) > 0
+      ? `Demande industrielle +${fmtM(parametresAppliques.industrie_m3_an)} Mm³/an dès ${parametresAppliques.annee_debut_industrie}`
+      : null,
+    parametresAppliques.rendement_distribution != null
+      ? `Rendement de distribution cible ${parametresAppliques.rendement_distribution} %`
+      : null,
+    Number(parametresAppliques.capacite_additionnelle_m3 || 0) > 0
+      ? `Capacité additionnelle +${fmtM(Number(parametresAppliques.capacite_additionnelle_m3) * 12)} Mm³/an`
+      : null,
+  ].filter(Boolean);
+
   return (
     <div className="scenarios-page">
       <div className="scenarios-header">
         <div>
-          <h1 className="scenarios-title">Moteur de scénarios prospectifs</h1>
+          <h1 className="scenarios-title">Cockpit de décision besoins–ressources</h1>
           <p className="scenarios-subtitle">
-            Simulez l'avenir, décidez avec des données — niveaux Centre / Installation / Groupe
+            Comparez le besoin à la ressource exploitable, identifiez le point de bascule et testez les leviers d’action.
           </p>
         </div>
         <div className="header-badge">
           <Rocket size={16} />
-          <span>ONEE-Predict • Précision ±7%</span>
+          <span>Simulation documentée</span>
         </div>
       </div>
 
-      <div className="tabs-container">
+      {view === 'all' && <div className="tabs-container">
         <button
           className={`tab-btn ${activeTab === 'presets' ? 'active' : ''}`}
           onClick={() => setActiveTab('presets')}
@@ -743,12 +1030,12 @@ export default function Scenarios() {
           <Settings size={16} />
           Paramètres avancés
         </button>
-      </div>
+      </div>}
 
-      {activeTab === 'presets' && (
+      {view !== 'advanced' && activeTab === 'presets' && (
         <div className="presets-section">
           <div className="presets-grid">
-            {PRESETS_OVERVIEW.map(p => (
+            {BLUEPRINT_PRESETS.map(p => (
               <div
                 key={p.id}
                 className={`preset-card ${activePreset === p.id ? 'active' : ''}`}
@@ -785,7 +1072,7 @@ export default function Scenarios() {
         </div>
       )}
 
-      {activeTab === 'presets' && (
+      {false && view !== 'advanced' && activeTab === 'presets' && (
         <div className="pilot-zones-section">
           <div className="section-header">
             <div>
@@ -795,19 +1082,37 @@ export default function Scenarios() {
             </div>
           </div>
           <div className="pilot-zone-grid">
-            {PILOT_ZONES.map((zone) => (
-              <div key={zone.id} className="pilot-zone-card">
+            {PILOT_ZONES.map((zone) => {
+              const centreIdsDisponibles = new Set(centres.map((centre) => centre.id));
+              const donneesChargees = centres.length > 0;
+              const indisponible = donneesChargees && zone.centres.some(
+                (centre) => !centreIdsDisponibles.has(centre.id),
+              );
+
+              return (
+              <div key={zone.id} className={`pilot-zone-card${indisponible ? ' pilot-zone-card-unavailable' : ''}`}>
                 <div className="pilot-zone-header">
                   <div>
                     <div className="pilot-zone-title">{zone.title}</div>
                     <div className="pilot-zone-subtitle">{zone.subtitle}</div>
                   </div>
-                  <span className="pilot-zone-badge">Pilote</span>
+                  <span className={`pilot-zone-badge${indisponible ? ' pilot-zone-badge-unavailable' : ' pilot-zone-badge-ready'}`}>
+                    {indisponible ? 'Données à intégrer' : 'Simulable'}
+                  </span>
                 </div>
                 <div className="pilot-zone-note">{zone.note}</div>
                 {zone.nonExhaustive && (
                   <div className="pilot-zone-non-exhaustive">Liste indicative, non exhaustive</div>
                 )}
+                <div className="pilot-inputs" aria-label={`Paramètres du scénario ${zone.title}`}>
+                  <div className="pilot-inputs-title">Paramètres du scénario</div>
+                  {zone.inputs.map(([label, value]) => (
+                    <div key={label} className="pilot-input-row">
+                      <span>{label}</span>
+                      <strong>{value}</strong>
+                    </div>
+                  ))}
+                </div>
                 {zone.centres.length > 0 ? (
                   <ul className="pilot-centers-list">
                     {zone.centres.map((centre) => (
@@ -820,31 +1125,23 @@ export default function Scenarios() {
                 ) : (
                   <div className="pilot-zone-empty">Aucune liste de centres détaillée disponible pour cette zone.</div>
                 )}
+                {indisponible && <div className="pilot-zone-data-note">{zone.dataNote || 'Les données nécessaires doivent être intégrées avant simulation.'}</div>}
                 <button
                   className="pilot-zone-action"
-                  onClick={() => {
-                    const preset = PRESETS.find((p) => p.id === zone.presetId);
-                    if (preset) {
-                      appliquerPreset({
-                        ...preset,
-                        id: zone.id,
-                        params: {
-                          ...preset.params,
-                          ...(zone.paramsOverride || {}),
-                        },
-                      });
-                    }
-                  }}
+                  title={indisponible ? 'Simulation indisponible tant que les données ne sont pas intégrées.' : 'Simuler ce pilote'}
+                  disabled={indisponible}
+                  onClick={() => simulerZonePilote(zone)}
                 >
-                  Simuler ce pilote
+                  {indisponible ? 'Simulation indisponible' : 'Simuler ce pilote'}
                 </button>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
 
-      {activeTab === 'custom' && (
+      {view !== 'prepared' && activeTab === 'custom' && (
         <div className="custom-section">
           <div className="params-grid">
             <div className="params-card">
@@ -913,12 +1210,14 @@ export default function Scenarios() {
                   <SelectWithSearch 
                     options={centres}
                     value={centreId}
-                    onChange={setCentreId}
+                    onChange={selectionnerCentre}
                     placeholder="Rechercher un centre..."
                     labelKey="label"
                     valueKey="id"
                     allOptionLabel="Tous les centres"
                   />
+                  {chargementParametres && <div className="params-sub">Chargement des moyennes historiques…</div>}
+                  {!chargementParametres && infoParametres && <div className="params-sub">{infoParametres}</div>}
                 </div>
                 
                 <Slider label="Taux d'accroissement" min={-5} max={15} step={0.1} value={taux} set={setTaux} suffix=" %/an" icon={TrendingUp} />
@@ -938,7 +1237,36 @@ export default function Scenarios() {
                 </div>
               </div>
               <div className="params-body">
-                <Slider label="Δ capacité de production" min={-100} max={300} step={5} value={deltaCap} set={setDeltaCap} suffix=" %" icon={Zap} />
+                <Slider label="Δ capacité de production" min={-100} max={0} step={5} value={deltaCap} set={setDeltaCap} suffix=" %" icon={Zap} />
+
+                <div className="param-field">
+                  <label className="param-label">INSTALLATION À SIMULER</label>
+                  <SelectWithSearch
+                    options={installations}
+                    value={installation}
+                    onChange={(id) => { setInstallation(id); setCapaciteAbsolue(0); }}
+                    placeholder="Rechercher une installation..."
+                    labelKey="label"
+                    valueKey="id"
+                    allOptionLabel="Toutes les installations"
+                  />
+                </div>
+
+                {installationSelectionnee && (
+                  <div className="param-field">
+                    <label className="param-label">CAPACITÉ IMPOSÉE (m³/mois)</label>
+                    <input
+                      type="number"
+                      className="param-input"
+                      min="0"
+                      max={installationSelectionnee.capacite_max_m3}
+                      placeholder={`Maximum disponible : ${Math.round(installationSelectionnee.capacite_max_m3).toLocaleString('fr-FR')}`}
+                      value={capaciteAbsolue || ''}
+                      onChange={e => setCapaciteAbsolue(Math.min(installationSelectionnee.capacite_max_m3, Math.max(0, +e.target.value || 0)))}
+                    />
+                    <div className="params-sub">Bornée par la capacité disponible de l’installation.</div>
+                  </div>
+                )}
                 
                 <div className="param-field">
                   <label className="param-label">RESSOURCE ADDITIONNELLE</label>
@@ -949,6 +1277,17 @@ export default function Scenarios() {
                     value={capAdd || ''}
                     onChange={e => setCapAdd(Math.max(0, +e.target.value || 0))}
                   />
+                </div>
+
+                <div className="param-field">
+                  <label className="param-label">CAPACITÉ FUTURE (m³/mois)</label>
+                  <input type="number" className="param-input" min="0" value={capAddFuture || ''}
+                    onChange={e => setCapAddFuture(Math.max(0, +e.target.value || 0))} />
+                </div>
+                <div className="param-field">
+                  <label className="param-label">MISE EN SERVICE</label>
+                  <input type="number" className="param-input" min="2024" max="2060" value={capAddFutureYear}
+                    onChange={e => setCapAddFutureYear(Math.min(2060, Math.max(2024, +e.target.value || 2024)))} />
                 </div>
                 
                 <div className="param-field">
@@ -992,7 +1331,7 @@ export default function Scenarios() {
         </div>
       )}
 
-      {!res && !erreur && activeTab === 'custom' && (
+      {!res && !erreur && view !== 'prepared' && activeTab === 'custom' && (
         <div className="empty-state">
           <BarChart3 size={48} />
           <div className="empty-title">Aucune simulation</div>
@@ -1002,39 +1341,48 @@ export default function Scenarios() {
 
       {res && ins && (
         <div className="results-section">
-          <div className="stats-grid">
-            <div className="stat-item">
-              <div className="stat-label">Demande à {ins.horizonAnnee || 'l\'horizon'}</div>
-              <div className="stat-value">{fmtM(ins.demandeScn || 0)} <span className="stat-unit">Mm³</span></div>
-              <div className="stat-desc">scénario simulé</div>
-            </div>
-            <div className="stat-item">
-              <div className="stat-label">Écart vs référence</div>
-              <div className={`stat-value ${(ins.deltaPct || 0) >= 0 ? 'trend-up' : 'trend-down'}`}>
-                {(ins.deltaPct || 0) >= 0 ? '+' : ''}{(ins.deltaPct || 0).toFixed(1)}%
+          <section className="decision-summary" aria-label="Résumé de décision">
+            <div className="decision-summary-head">
+              <div>
+                <div className="eyebrow">RÉSULTAT DU SCÉNARIO</div>
+                <h2>{activeScenario ? activeScenario.titre : 'Référence du modèle'} · horizon {ins.horizonAnnee || 'sélectionné'}</h2>
+                <p>Les traits pleins représentent la référence du modèle ; le trait orange traduit l’hypothèse simulée.</p>
               </div>
-              <div className="stat-desc">demande projetée</div>
-            </div>
-            <div className="stat-item">
-              <div className="stat-label">Capacité mobilisée</div>
-              <div className="stat-value">{fmtM(ins.capacite || 0)} <span className="stat-unit">Mm³</span></div>
-              <div className="stat-desc">ressource — bilan</div>
-            </div>
-            {ins.capaciteAdditionnelle > 0 && (
-              <div className="stat-item">
-                <div className="stat-label">Capacité additionnelle</div>
-                <div className="stat-value">{fmtM(ins.capaciteAdditionnelle)} <span className="stat-unit">Mm³</span></div>
-                <div className="stat-desc">{ins.capaciteAdditionnelleLibelle || 'Ressource pilotée'}</div>
+              <div className={`decision-status ${ins.deficit > 0 ? 'risk' : (Number(parametresAppliques.stress_ressource_pct || 0) > 0 ? 'warn' : 'safe')}`}>
+                {ins.deficit > 0
+                  ? 'Renforcement nécessaire'
+                  : Number(parametresAppliques.stress_ressource_pct || 0) > 0
+                    ? 'Capacité suffisante sous stress'
+                    : 'Capacité suffisante'}
               </div>
-            )}
-            <div className="stat-item">
-              <div className="stat-label">Bilan besoins / capacité</div>
-              <div className={`stat-value ${(ins.deficit || 0) > 0 ? 'negative' : 'positive'}`}>
-                {(ins.deficit || 0) > 0 ? `−${fmtM(ins.deficit)} Mm³` : 'Équilibré'}
-              </div>
-              <div className="stat-desc">{(ins.deficit || 0) > 0 ? `${ins.nDeficit || 0} zone(s) à risque` : 'couverture assurée'}</div>
             </div>
-          </div>
+            <div className="scenario-trace">
+              <span className="scenario-trace-label">Hypothèses appliquées</span>
+              {hypotheseTrace.length > 0 ? hypotheseTrace.map((hypothese) => (
+                <span className="scenario-trace-tag" key={hypothese}>{hypothese}</span>
+              )) : (
+                <span className="scenario-trace-tag neutral">Aucun levier — situation de référence</span>
+              )}
+            </div>
+            <div className="decision-kpis">
+              <div className="decision-kpi">
+                <span>{parametresAppliques.cible === 'production' && parametresAppliques.rendement_distribution != null ? 'Volume à mobiliser' : 'Besoin à l’horizon'}</span>
+                <strong>{fmtM(ins.demandeScn || 0)} <small>Mm³/an</small></strong>
+              </div>
+              <div className="decision-kpi">
+                <span>Capacité simulée à l’horizon</span>
+                <strong>{fmtM(annualBalance?.capScenarioAnnual || 0)} <small>Mm³/an</small></strong>
+              </div>
+              <div className={`decision-kpi ${(annualBalance?.pointCritique?.ecartScenario || 0) < 0 ? 'risk' : 'safe'}`}>
+                <span>{annualBalance?.debutStress ? `Marge minimale (${annualBalance.debutStress}–${annualBalance.finStress})` : 'Écart à l’horizon'}</span>
+                <strong>{(annualBalance?.pointCritique?.ecartScenario || 0) < 0 ? 'Déficit ' : 'Marge '}{fmtM(Math.abs(annualBalance?.pointCritique?.ecartScenario || 0))} <small>Mm³/an</small></strong>
+              </div>
+              <div className={`decision-kpi ${annualBalance?.firstDeficitYear ? 'risk' : 'safe'}`}>
+                <span>Année de rupture</span>
+                <strong>{annualBalance?.firstDeficitYear || 'Aucune'} </strong>
+              </div>
+            </div>
+          </section>
 
           {ins.verdict && (
             <div className="recommendation-card" style={{ borderLeftColor: getStatusColor(ins.verdict.ton) }}>
@@ -1051,7 +1399,7 @@ export default function Scenarios() {
                 <strong>Action recommandée :</strong> {ins.verdict.action}
               </div>
               <div className="recommendation-note">
-                Projection établie avec le modèle IA ONEE-Predict — erreur ≈ 7 %, soit 2× plus précis que la méthode classique.
+                Référence issue du modèle ONEE-Predict. Les leviers et leurs effets sont explicitement tracés ci-dessus ; ils doivent être validés par les équipes métier.
               </div>
             </div>
           )}
@@ -1059,52 +1407,30 @@ export default function Scenarios() {
           <div className="chart-card">
             <div className="chart-header">
               <div className="chart-title">Courbes croisées demande vs capacité</div>
-              <div className="chart-subtitle">{res.annuel?.perimetre || 'Tous les centres'} · volume annuel jusqu'à l'horizon</div>
+              <div className="chart-subtitle">{res.annuel?.perimetre || 'Tous les centres'} · volume annuel jusqu'à l'horizon · capacité 2024 maintenue constante hors choc ou mise en service déclarés</div>
             </div>
-            {annualComparison && (
-              <div className="compare-controls">
-                <div className="compare-item compare-fixed">
-                  <span className="compare-label">Référence</span>
-                  <span className="compare-value">{annualComparison.baseGrowthPct.toFixed(1)} %/an</span>
-                </div>
-                {annualBalance?.firstDeficitYear && (
-                  <div className="compare-item compare-alert">
-                    <span className="compare-label">Basculement déficit</span>
-                    <span className="compare-value">{annualBalance.firstDeficitYear}</span>
-                  </div>
-                )}
-                <label className="compare-item">
-                  <span className="compare-label">Hypothèse basse</span>
-                  <input
-                    type="number"
-                    min={-5}
-                    max={15}
-                    step={0.1}
-                    value={growthLow}
-                    onChange={(e) => setGrowthLow(Number(e.target.value))}
-                    className="compare-input"
-                  />
-                </label>
-                <label className="compare-item">
-                  <span className="compare-label">Hypothèse haute</span>
-                  <input
-                    type="number"
-                    min={-5}
-                    max={15}
-                    step={0.1}
-                    value={growthHigh}
-                    onChange={(e) => setGrowthHigh(Number(e.target.value))}
-                    className="compare-input"
-                  />
-                </label>
-              </div>
-            )}
+            <div className="decision-legend">
+              <span><i className="legend-line reference" /> Référence du modèle</span>
+              <span><i className="legend-line scenario" /> Hypothèse de scénario</span>
+              <span><i className="legend-line capacity" /> Capacité exploitable simulée</span>
+              <span><i className="legend-band" /> Zone d'incertitude</span>
+            </div>
             <div className="chart-container">
               <canvas ref={chartRef}></canvas>
             </div>
           </div>
 
-          {annualBalance && (
+          <button
+            type="button"
+            className="technical-toggle"
+            onClick={() => setShowTechnicalDetails((open) => !open)}
+            aria-expanded={showTechnicalDetails}
+          >
+            {showTechnicalDetails ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            {showTechnicalDetails ? 'Masquer les détails techniques' : 'Voir les détails techniques'}
+          </button>
+
+          {showTechnicalDetails && annualBalance && (
             <div className="alerts-grid">
               <div className={`alert-card ${annualBalance.firstDeficitYear ? 'critical' : 'safe'}`}>
                 <div className="alert-title">Alerte basculement en déficit</div>
@@ -1146,7 +1472,7 @@ export default function Scenarios() {
             </div>
           )}
 
-          {annualBalance?.rows?.length > 0 && (
+          {showTechnicalDetails && annualBalance?.rows?.length > 0 && (
             <div className="table-card" style={{ marginBottom: '20px' }}>
               <div className="table-header">
                 <div className="table-title">Bilan annuel détaillé (Besoins / Capacités / Écarts)</div>
@@ -1185,7 +1511,7 @@ export default function Scenarios() {
             </div>
           )}
 
-          {res.bilan?.par_dr && res.bilan.par_dr.length > 0 && (
+          {showTechnicalDetails && res.bilan?.par_dr && res.bilan.par_dr.length > 0 && (
             <div className="table-card">
               <div className="table-header">
                 <div className="table-title">Bilan besoins / capacité par zone</div>
@@ -1224,7 +1550,7 @@ export default function Scenarios() {
             </div>
           )}
 
-          {vulnerabilityMap.length > 0 && (
+          {showTechnicalDetails && vulnerabilityMap.length > 0 && (
             <div className="vulnerability-card">
               <div className="table-header">
                 <div className="table-title">Carte de vulnérabilité (horizon simulé)</div>
@@ -1820,6 +2146,57 @@ export default function Scenarios() {
           margin-top: 32px;
         }
 
+        .decision-summary {
+          background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+          border: 1px solid #dbeafe;
+          border-radius: 16px;
+          padding: 22px;
+          margin-bottom: 20px;
+          box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+        }
+
+        .decision-summary-head {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 16px;
+          margin-bottom: 20px;
+        }
+
+        .eyebrow { font-size: 0.68rem; font-weight: 700; letter-spacing: .08em; color: #2563eb; }
+        .decision-summary h2 { margin: 5px 0; color: #0f172a; font-size: 1.25rem; }
+        .decision-summary p { margin: 0; color: #64748b; font-size: .82rem; }
+        .decision-status { white-space: nowrap; padding: 7px 10px; border-radius: 999px; font-size: .75rem; font-weight: 700; }
+        .decision-status.safe { color: #047857; background: #d1fae5; }
+        .decision-status.warn { color: #b45309; background: #fef3c7; }
+        .decision-status.risk { color: #b91c1c; background: #fee2e2; }
+
+        .scenario-trace { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: -6px 0 16px; }
+        .scenario-trace-label { color: #475569; font-size: .74rem; font-weight: 700; margin-right: 2px; }
+        .scenario-trace-tag { color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 999px; padding: 5px 8px; font-size: .72rem; line-height: 1; }
+        .scenario-trace-tag.neutral { color: #475569; background: #f8fafc; border-color: #cbd5e1; }
+
+        .decision-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+        .decision-kpi { padding: 14px; border-radius: 12px; background: #fff; border: 1px solid #e2e8f0; }
+        .decision-kpi span { display: block; color: #64748b; font-size: .72rem; margin-bottom: 7px; }
+        .decision-kpi strong { color: #0f172a; font-size: 1.04rem; line-height: 1.25; }
+        .decision-kpi small { color: #64748b; font-weight: 500; font-size: .72rem; }
+        .decision-kpi.safe strong { color: #047857; }
+        .decision-kpi.risk strong { color: #b91c1c; }
+
+        .compare-controls { display: none; }
+
+        .decision-legend { display: flex; flex-wrap: wrap; gap: 14px; margin: -6px 0 16px; color: #475569; font-size: .76rem; }
+        .decision-legend span { display: inline-flex; align-items: center; gap: 6px; }
+        .legend-line { display: inline-block; width: 22px; border-top: 3px solid; }
+        .legend-line.reference { border-color: #3b82f6; }
+        .legend-line.scenario { border-color: #f59e0b; border-top-style: dashed; }
+        .legend-line.capacity { border-color: #16a34a; border-top-style: dashed; }
+        .legend-band { width: 18px; height: 10px; background: rgba(59, 130, 246, .16); border-radius: 3px; }
+
+        .technical-toggle { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 11px; margin: 0 0 18px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; color: #334155; font-weight: 600; cursor: pointer; }
+        .technical-toggle:hover { background: #f8fafc; }
+
         .stats-grid {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -2293,6 +2670,20 @@ export default function Scenarios() {
           min-height: 280px;
         }
 
+        @media (max-width: 900px) {
+          .decision-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+
+        @media (max-width: 560px) {
+          .decision-summary-head { flex-direction: column; }
+          .decision-kpis { grid-template-columns: 1fr; }
+        }
+
+        .pilot-zone-card-unavailable {
+          border-color: #fed7aa;
+          background: #fffdf9;
+        }
+
         .pilot-zone-header {
           display: flex;
           justify-content: space-between;
@@ -2323,6 +2714,16 @@ export default function Scenarios() {
           white-space: nowrap;
         }
 
+        .pilot-zone-badge-ready {
+          background: #ecfdf5;
+          color: #047857;
+        }
+
+        .pilot-zone-badge-unavailable {
+          background: #fff7ed;
+          color: #c2410c;
+        }
+
         .pilot-zone-note {
           font-size: 0.8rem;
           color: #475569;
@@ -2341,6 +2742,41 @@ export default function Scenarios() {
           font-weight: 700;
           margin-bottom: 12px;
           flex-shrink: 0;
+        }
+
+        .pilot-inputs {
+          margin: 0 0 12px;
+          padding: 10px;
+          border: 1px solid #e2e8f0;
+          border-radius: 10px;
+          background: #f8fafc;
+          display: grid;
+          gap: 6px;
+          flex-shrink: 0;
+        }
+
+        .pilot-inputs-title {
+          color: #334155;
+          font-size: 0.72rem;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          margin-bottom: 2px;
+        }
+
+        .pilot-input-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: baseline;
+          gap: 8px;
+          color: #64748b;
+          font-size: 0.72rem;
+        }
+
+        .pilot-input-row strong {
+          color: #0f172a;
+          text-align: right;
+          font-weight: 700;
         }
 
         .pilot-centers-list {
@@ -2384,6 +2820,17 @@ export default function Scenarios() {
           flex: 1;
         }
 
+        .pilot-zone-data-note {
+          margin: 0 0 12px;
+          padding: 9px 10px;
+          border-radius: 10px;
+          background: #fff7ed;
+          color: #9a3412;
+          font-size: 0.74rem;
+          line-height: 1.35;
+          font-weight: 600;
+        }
+
         .pilot-zone-action {
           width: 100%;
           margin-top: 12px;
@@ -2402,6 +2849,18 @@ export default function Scenarios() {
         .pilot-zone-action:hover {
           background: #e0e7ff;
           border-color: #a5b4fc;
+        }
+
+        .pilot-zone-action:disabled {
+          cursor: not-allowed;
+          background: #f1f5f9;
+          border-color: #e2e8f0;
+          color: #94a3b8;
+        }
+
+        .pilot-zone-action:disabled:hover {
+          background: #f1f5f9;
+          border-color: #e2e8f0;
         }
 
         @media (max-width: 1200px) {

@@ -32,6 +32,7 @@ class ScenarioRequest(BaseModel):
     cible: str = Field("consommation_totale",
                        description="distribution | production | consommation_totale")
     centre_id: Optional[str] = Field(None, description="None = tous les centres")
+    centre_ids: List[str] = Field(default_factory=list, description="Groupe explicite de centres")
     taux_accroissement: Optional[float] = Field(
         None, ge=-5, le=15, description="Taux d'accroissement population (%/an)")
     rendement_distribution: Optional[float] = Field(
@@ -40,6 +41,14 @@ class ScenarioRequest(BaseModel):
         None, ge=60, le=100, description="Rendement d'adduction cible (%)")
     taux_branchement: Optional[float] = Field(
         None, ge=5, le=100, description="Taux de branchement cible (%)")
+    dotation_pct: Optional[float] = Field(
+        None, ge=-50, le=100, description="Variation de dotation par rapport a la reference (%)")
+    tourisme_pct: Optional[float] = Field(
+        None, ge=0, le=100, description="Surcharge touristique appliquee a la demande (%)")
+    industrie_m3_an: Optional[float] = Field(
+        None, ge=0, description="Demande industrielle additionnelle (m3/an)")
+    annee_debut_industrie: Optional[int] = Field(
+        None, ge=2024, le=2060, description="Annee de debut de la demande industrielle")
     annee_horizon: int = Field(2054, ge=2024, le=2060, description="Horizon (n+30)")
 
     # --- Niveau 2 : Installation (capacite, horizon m+12) ---
@@ -47,12 +56,26 @@ class ScenarioRequest(BaseModel):
     annee_mensuel: Optional[int] = Field(None, description="Annee des previsions mensuelles")
     delta_capacite_pct: Optional[float] = Field(
         None, ge=-100, le=300, description="Variation de capacite de production (%)")
+    stress_ressource_pct: Optional[float] = Field(
+        None, ge=0, le=100, description="Reduction de ressource exploitable (secheresse, %)")
+    annee_debut_stress: Optional[int] = Field(
+        None, ge=2024, le=2060, description="Annee de debut du stress sur la ressource")
+    duree_stress_ans: Optional[int] = Field(
+        None, ge=1, le=30, description="Duree du stress sur la ressource (annees)")
+    maintenance_pct: Optional[float] = Field(
+        None, ge=0, le=100, description="Indisponibilite temporaire de capacite (%)")
     capacite_absolue: Optional[float] = Field(
         None, ge=0, description="Capacite imposee (m3/mois), prioritaire sur le delta")
     capacite_additionnelle_m3: Optional[float] = Field(
         None, ge=0, description="Capacite additionnelle disponible (m3/mois)")
     capacite_additionnelle_libelle: Optional[str] = Field(
         None, description="Libelle de la ressource additionnelle")
+    capacite_additionnelle_ulterieure_m3: Optional[float] = Field(
+        None, ge=0, description="Capacité mensuelle qui sera disponible ultérieurement")
+    annee_debut_capacite_ulterieure: Optional[int] = Field(
+        None, ge=2024, le=2060, description="Année de mise en service de la capacité ultérieure")
+    cout_unitaire_capex_mad_m3_an: float = Field(
+        0, ge=0, description="Hypothese parametrique de CAPEX (MAD par m3/an ajoute)")
 
     # --- Niveau 3 : Groupe de centres (bilan + affectation) ---
     reaffectations: List[Reaffectation] = Field(default_factory=list)
@@ -74,6 +97,18 @@ def simuler(req: ScenarioRequest):
         params["cible"] = "consommation_totale"
     params["reaffectations"] = [_dump(r) for r in req.reaffectations]
     return scenario_engine.executer_scenario(PredictionService.get(), params)
+
+
+@router.get("/parametres-centre/{centre_id}")
+def parametres_centre(centre_id: str):
+    """Moyennes historiques à utiliser comme valeurs initiales d'un centre.
+
+    Les valeurs restent seulement des suggestions : le client peut ensuite les
+    ajuster librement avant de lancer la simulation.
+    """
+    service = PredictionService.get()
+    valeurs = scenario_engine.moyennes_parametres_centre(service.historique, centre_id)
+    return {"centre_id": centre_id, **valeurs}
 
 
 @router.get("/exemple")

@@ -22,11 +22,11 @@ const formatTo2Decimals = (value) => {
 // Années disponibles
 const AVAILABLE_YEARS = Array.from({ length: 2023 - 2000 + 1 }, (_, i) => 2000 + i);
 
-const AnalyticsCharts = ({ region = 'all', year = 2023 }) => {
+const AnalyticsCharts = ({ region = 'all', year = 2023, zones = [] }) => {
   const [tauxData, setTauxData] = useState(null);
   const [rendementData, setRendementData] = useState(null);
   const [scatterData, setScatterData] = useState(null);
-  const [dotationBfData, setDotationBfData] = useState(null);
+  const [dotationBfData] = useState(null);
   const [dotationsData, setDotationsData] = useState(null);
   const [loading, setLoading] = useState(true);
   
@@ -102,21 +102,6 @@ const AnalyticsCharts = ({ region = 'all', year = 2023 }) => {
     fetchScatter();
   }, [region, scatterYear]);
 
-  // Fetch Scatter Dotation BF vs Population
-  useEffect(() => {
-    const fetchDotationBf = async () => {
-      try {
-        const params = new URLSearchParams({ region, year: dotationYear.toString() });
-        const res = await fetch(`${API_BASE}/dashboard/analytics/scatter-dotation-bf-pop?${params}`);
-        const data = await res.json();
-        setDotationBfData(data);
-      } catch (err) {
-        console.error("Erreur dotation BF:", err);
-      }
-    };
-    fetchDotationBf();
-  }, [region, dotationYear]);
-
   // Fetch Dotations annuelles
   useEffect(() => {
     const fetchDotations = async () => {
@@ -137,10 +122,10 @@ const AnalyticsCharts = ({ region = 'all', year = 2023 }) => {
   }, [region, dotsStartYear, dotsEndYear]);
 
   useEffect(() => {
-    if (tauxData && rendementData && scatterData && dotationBfData && dotationsData) {
+    if (tauxData && rendementData && scatterData && dotationsData) {
       setLoading(false);
     }
-  }, [tauxData, rendementData, scatterData, dotationBfData, dotationsData]);
+  }, [tauxData, rendementData, scatterData, dotationsData]);
 
   // Dropdown component
   const YearDropdown = ({ value, onChange, isOpen, setIsOpen, options }) => (
@@ -191,6 +176,7 @@ const AnalyticsCharts = ({ region = 'all', year = 2023 }) => {
       scales: { 
         y: { 
           title: { display: true, text: 'Taux de branchement (%)' }, 
+          min: 0,
           max: 100,
           ticks: { 
             callback: (v) => formatTo2Decimals(v) + '%'
@@ -228,6 +214,7 @@ const AnalyticsCharts = ({ region = 'all', year = 2023 }) => {
       scales: { 
         y: { 
           title: { display: true, text: 'Rendement (%)' }, 
+          min: 0,
           max: 100,
           ticks: { 
             callback: (v) => formatTo2Decimals(v) + '%'
@@ -243,17 +230,8 @@ const AnalyticsCharts = ({ region = 'all', year = 2023 }) => {
     data: {
       datasets: [{
         label: 'Centres',
-        data: scatterData?.data?.map(d => ({ 
-          x: d.x * 100, 
-          y: d.y * 100, 
-          label: d.label
-        })) || [],
-        backgroundColor: chartColors.blue + 'cc',
-        borderColor: chartColors.blue,
-        pointRadius: 6,
-        pointHoverRadius: 8,
-        pointBorderWidth: 2,
-        pointBorderColor: '#fff'
+        data: (scatterData?.data || []).map(d => ({ x: d.x * 100, y: d.y * 100, label: d.label })),
+        backgroundColor: chartColors.blue + 'cc', borderColor: chartColors.blue, pointRadius: 6, pointHoverRadius: 8, pointBorderWidth: 2, pointBorderColor: '#fff'
       }]
     },
     options: {
@@ -491,6 +469,9 @@ const AnalyticsCharts = ({ region = 'all', year = 2023 }) => {
               <Activity size={14} style={{ marginRight: '6px', color: chartColors.blue }} />
               Rendement vs Taux de branchement
             </div>
+            <div className="card-sub" style={{ fontSize: '0.75rem', marginTop: '4px' }}>
+              Valeurs calculées selon les formules métier ; aucun seuil d'alerte n'est appliqué.
+            </div>
             <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
               <Calendar size={12} style={{ color: 'var(--text2)' }} />
               <YearDropdown 
@@ -582,6 +563,7 @@ const AnalyticsCharts = ({ region = 'all', year = 2023 }) => {
       </div>
 
       <style jsx>{`
+        .card:has(#dotationBfChart) { display: none; }
         .year-button {
           display: flex;
           align-items: center;

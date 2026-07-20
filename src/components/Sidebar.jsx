@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Droplets, Factory, Scale, Brain, Search, Building2, Sparkles, Database } from 'lucide-react';
+import { LayoutDashboard, Droplets, Factory, Scale, Brain, Search, Building2, Sparkles } from 'lucide-react';
 
 const Sidebar = ({ activePage, setActivePage, region, setRegion }) => {
   const navItems = [
@@ -13,8 +13,7 @@ const Sidebar = ({ activePage, setActivePage, region, setRegion }) => {
   const analysisItems = [
     { id: 'manquant', label: 'Données manquantes', icon: Search, badge: '3' },
     { id: 'architecture', label: 'Architecture', icon: Building2 },
-    { id: 'scenarios', label: 'Scénarios', icon: Sparkles },
-    { id: 'tables', label: 'Tables', icon: Database }  // AJOUT : Tables dans l'analyse
+    { id: 'scenarios', label: 'Scénarios', icon: Sparkles }
   ];
 
   const regions = [

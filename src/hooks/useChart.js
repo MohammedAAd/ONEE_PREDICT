@@ -49,5 +49,5 @@ export const useChart = (canvasId, config, enabled = true) => {
         chartRef.current = null;
       }
     };
-  }, [canvasId, enabled, JSON.stringify(config)]); // Recrée si config change
+  }); // Recontrôle le canvas à chaque rendu, notamment après un chargement conditionnel.
 };

@@ -7,7 +7,7 @@ Aucune base de donnees : tout vient de PredictionService (artefacts en memoire).
 Monte sous le prefixe /api/v1 -> endpoints accessibles sur /api/v1/prediction/...
 """
 from fastapi import APIRouter, Query, HTTPException
-from typing import Optional
+from typing import Optional, List
 
 from backend.services.prediction_service import PredictionService, CIBLES_VALIDES
 
@@ -42,13 +42,14 @@ def previsions_annuelles(
     centre_id: Optional[str] = Query(None, description="Filtrer sur un centre"),
     cible: Optional[str] = Query(None, description="distribution | production | consommation_totale"),
     region: Optional[str] = Query(None, description="Filtrer sur une region"),
+    zones: Optional[List[str]] = Query(None, description="Filtrer sur une ou plusieurs zones"),
     annee_debut: Optional[int] = Query(None),
     annee_fin: Optional[int] = Query(None),
 ):
     """Previsions annuelles {id_centre_desservi, annee, cible, q10, q50, q90}."""
     if cible and cible not in CIBLES_VALIDES:
         raise HTTPException(400, f"cible invalide. Attendu: {', '.join(CIBLES_VALIDES)}")
-    return _svc().get_previsions_annuelles(centre_id, annee_debut, annee_fin, cible, region)
+    return _svc().get_previsions_annuelles(centre_id, annee_debut, annee_fin, cible, region, zones)
 
 
 @router.get("/previsions-mensuelles")
@@ -107,3 +108,9 @@ def liste_centres():
 def liste_dr():
     """Liste des Directions Regionales pour les filtres."""
     return _svc().get_liste_dr()
+
+
+@router.get("/installations")
+def liste_installations():
+    """Installations disponibles pour les scénarios de capacité."""
+    return _svc().get_liste_installations()

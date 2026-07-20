@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Globe, ChevronDown, ChevronUp, RefreshCw, Calendar, List, TrendingUp, TrendingDown } from 'lucide-react';
 import { chartColors, chartOptions } from '../utils/chartConfig';
 
@@ -60,12 +60,8 @@ const Consommation = () => {
   const [usageData, setUsageData] = useState({ labels: ['2024', '2030'], datasets: [] });
   const [centresData, setCentresData] = useState([]);
   const [previsionsData, setPrevisionsData] = useState([]);
-  const [previsionEvolution, setPrevisionEvolution] = useState({
-    labels: ['2024', '2025', '2026', '2027', '2028', '2029', '2030'],
-    values: [125.4, 128.2, 131.5, 135.1, 139.0, 143.2, 147.8],
-    tendance: 22.4,
-    tauxCroissance: 17.9
-  });
+  const [previsionEvolution, setPrevisionEvolution] = useState({ labels: [], values: [], tendance: 0, tauxCroissance: 0 });
+  const [forecastYears, setForecastYears] = useState([]);
   
   const [loading, setLoading] = useState(true);
   const [loadingRegions, setLoadingRegions] = useState(true);
@@ -133,11 +129,7 @@ const Consommation = () => {
       console.log('Chargement des prévisions consommation...');
       
       try {
-        const params = new URLSearchParams({
-          cible: 'consommation_totale',
-          annee_debut: '2024',
-          annee_fin: '2030'
-        });
+        const params = new URLSearchParams({ cible: 'consommation_totale' });
         if (selectedRegion.code !== 'all') {
           params.append('region', selectedRegion.name);
         }
@@ -169,7 +161,7 @@ const Consommation = () => {
               }
             });
             
-            const years = Object.keys(evolutionByYear).sort();
+            const years = Object.keys(evolutionByYear).map(Number).sort((a, b) => a - b);
             if (years.length > 0) {
               const values = years.map(y => evolutionByYear[y]);
               const firstValue = values[0] || 0;
@@ -183,16 +175,18 @@ const Consommation = () => {
                 tendance: tendance,
                 tauxCroissance: tauxCroissance
               });
+              setForecastYears(years);
               
               setPrevisionsData(previsionsArray);
             }
           } else {
             setPrevisionEvolution({
-              labels: ['2024'],
-              values: [0],
+              labels: [],
+              values: [],
               tendance: 0,
               tauxCroissance: 0
             });
+            setForecastYears([]);
             setPrevisionsData([]);
           }
         }
@@ -204,6 +198,29 @@ const Consommation = () => {
       console.error("Erreur prévisions:", err);
     }
   }, [selectedRegion.code, selectedRegion.name]);
+
+  useEffect(() => {
+    if (forecastYears.length > 0 && !forecastYears.includes(selectedYear)) {
+      setSelectedYear(forecastYears[forecastYears.length - 1]);
+    }
+  }, [forecastYears, selectedYear]);
+
+  const displayedPrevision = useMemo(() => {
+    const rows = previsionEvolution.labels
+      .map((year, index) => ({ year: Number(year), value: previsionEvolution.values[index] }))
+      .filter((row) => row.year <= selectedYear);
+    const values = rows.map((row) => row.value);
+    const first = values[0] || 0;
+    const current = values[values.length - 1] || 0;
+    return {
+      labels: rows.map((row) => row.year),
+      values,
+      firstYear: rows[0]?.year ?? null,
+      currentYear: rows[rows.length - 1]?.year ?? null,
+      tendance: current - first,
+      tauxCroissance: first > 0 ? ((current - first) / first) * 100 : 0,
+    };
+  }, [previsionEvolution, selectedYear]);
 
   // Récupérer la consommation par usage
   const fetchUsageData = useCallback(async () => {
@@ -311,11 +328,11 @@ const Consommation = () => {
   const chartConfig = {
     type: 'line',
     data: {
-      labels: previsionEvolution.labels,
+      labels: displayedPrevision.labels,
       datasets: [
         {
           label: 'Consommation prévue (M m³)',
-          data: previsionEvolution.values,
+          data: displayedPrevision.values,
           borderColor: getChartColors().lineColor,
           backgroundColor: getChartColors().areaColor,
           borderWidth: 3,
@@ -347,7 +364,7 @@ const Consommation = () => {
             afterLabel: (ctx) => {
               const idx = ctx.dataIndex;
               if (idx > 0) {
-                const prev = previsionEvolution.values[idx - 1];
+                const prev = displayedPrevision.values[idx - 1];
                 const current = ctx.raw;
                 const variation = ((current - prev) / prev * 100);
                 return `Variation: ${variation >= 0 ? '+' : ''}${variation.toFixed(1)}%`;
@@ -373,7 +390,7 @@ const Consommation = () => {
     }
   };
 
-  useChart('previsionChart', chartConfig, [previsionEvolution]);
+  useChart('previsionChart', chartConfig, [displayedPrevision]);
 
   useChart('usageChart', {
     type: 'bar',
@@ -480,23 +497,40 @@ const Consommation = () => {
 
           {/* Stats Prévisions */}
           {activeTab === 'prevision' && previsionEvolution.values.length > 0 && (
-            <div className="prevision-stats">
-              <div className="stat-card">
-                <div className="stat-label">2024</div>
-                <div className="stat-value">{formatMm3(previsionEvolution.values[0])}</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-label">2030</div>
-                <div className="stat-value">{formatMm3(previsionEvolution.values[previsionEvolution.values.length - 1])}</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-label">Évolution</div>
-                <div className="stat-value" style={{ color: previsionEvolution.tendance > 0 ? 'var(--green)' : 'var(--red)' }}>
-                  {previsionEvolution.tendance > 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                  {previsionEvolution.tauxCroissance >= 0 ? '+' : ''}{previsionEvolution.tauxCroissance?.toFixed(1)}%
+            <>
+              <div className="filter-group">
+                <div className="filter-label">Année de prévision :</div>
+                <div className="dropdown-container small">
+                  <button onClick={() => setIsYearDropdownOpen(!isYearDropdownOpen)} className="year-button">
+                    {selectedYear} <ChevronDown size={12} />
+                  </button>
+                  {isYearDropdownOpen && (
+                    <div className="dropdown-menu">
+                      {AVAILABLE_YEARS.slice(-15).map(y => (
+                        <div key={y} onClick={() => handleSelectedYearChange(y)} className="dropdown-item">{y}</div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
+              <div className="prevision-stats">
+                <div className="stat-card">
+                  <div className="stat-label">{displayedPrevision.firstYear}</div>
+                  <div className="stat-value">{formatMm3(displayedPrevision.values[0])}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-label">Prévision {displayedPrevision.currentYear}</div>
+                  <div className="stat-value">{formatMm3(displayedPrevision.values[displayedPrevision.values.length - 1])}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-label">Évolution</div>
+                  <div className="stat-value" style={{ color: displayedPrevision.tendance > 0 ? 'var(--green)' : 'var(--red)' }}>
+                    {displayedPrevision.tendance > 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                    {displayedPrevision.tauxCroissance >= 0 ? '+' : ''}{displayedPrevision.tauxCroissance?.toFixed(1)}%
+                  </div>
+                </div>
+              </div>
+            </>
           )}
 
           {/* Filtres pour les autres onglets */}
@@ -543,7 +577,7 @@ const Consommation = () => {
                   </button>
                   {isYearDropdownOpen && (
                     <div className="dropdown-menu">
-                      {AVAILABLE_YEARS.slice(-15).map(y => (
+                      {forecastYears.map(y => (
                         <div key={y} onClick={() => handleSelectedYearChange(y)} className="dropdown-item">{y}</div>
                       ))}
                     </div>
@@ -586,8 +620,8 @@ const Consommation = () => {
       {activeTab === 'prevision' && (
         <div className="card">
           <div className="card-header">
-            <div className="card-title">Prévision de consommation — 2024 à 2030</div>
-            <div className="card-sub">Modèle ML ONEE · Projection annuelle (q50)</div>
+            <div className="card-title">Prévision de consommation — jusqu’à {selectedYear}</div>
+            <div className="card-sub">Modèle ML ONEE · Projection annuelle Q50 · Années livrées : {forecastYears.join(', ')}</div>
           </div>
           <div className="chart-container">
             <canvas id="previsionChart" style={{ width: '100%', height: '100%' }}></canvas>
@@ -600,11 +634,11 @@ const Consommation = () => {
                 <tr><th>Année</th><th>Consommation (M m³)</th><th>Variation annuelle</th><th>Variation cumulée</th></tr>
               </thead>
               <tbody>
-                {previsionEvolution.labels.map((year, idx) => {
-                  const currentValue = previsionEvolution.values[idx];
-                  const prevValue = idx > 0 ? previsionEvolution.values[idx - 1] : currentValue;
+                {displayedPrevision.labels.map((year, idx) => {
+                  const currentValue = displayedPrevision.values[idx];
+                  const prevValue = idx > 0 ? displayedPrevision.values[idx - 1] : currentValue;
                   const variation = idx > 0 ? ((currentValue - prevValue) / prevValue * 100) : 0;
-                  const variationCumulee = idx > 0 ? ((currentValue - previsionEvolution.values[0]) / previsionEvolution.values[0] * 100) : 0;
+                  const variationCumulee = idx > 0 ? ((currentValue - displayedPrevision.values[0]) / displayedPrevision.values[0] * 100) : 0;
                   
                   return (
                     <tr key={year}>
@@ -651,16 +685,15 @@ const Consommation = () => {
             <div className="table-responsive">
               <table className="data-table">
                 <thead>
-                  <tr><th>Centre</th><th>Province</th><th>Conso {selectedYear}</th><th>Conso 2027</th><th>Conso 2030</th><th>Variation</th><th>Statut</th></tr>
+                  <tr><th>Centre</th><th>Province</th><th>Référence modèle</th><th>Prévision {selectedYear}</th><th>Variation</th><th>Statut</th></tr>
                 </thead>
                 <tbody>
                   {(centresData || []).map((c, idx) => (
                     <tr key={idx}>
                       <td>{c.name}</td>
                       <td>{c.province}</td>
-                      <td className="mono">{c.conso2024} M</td>
-                      <td className="mono">{c.conso2027} M</td>
-                      <td className="mono">{c.conso2030} M</td>
+                      <td className="mono">{c.conso_reference} M ({c.annee_reference})</td>
+                      <td className="mono">{c.conso_selected ?? c.conso2024} M</td>
                       <td className="mono">{c.variation}</td>
                       <td><span className={getStatusClass(c.status)}>{c.statusText}</span></td>
                     </tr>

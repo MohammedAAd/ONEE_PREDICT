@@ -146,7 +146,8 @@ class PredictionService:
                                  annee_debut: Optional[int] = None,
                                  annee_fin: Optional[int] = None,
                                  cible: Optional[str] = None,
-                                 region: Optional[str] = None) -> List[Dict]:
+                                 region: Optional[str] = None,
+                                 zones: Optional[List[str]] = None) -> List[Dict]:
         out = self.annuelles
         if centre_id:
             cid = str(centre_id).strip()
@@ -158,6 +159,19 @@ class PredictionService:
                 _centre_id(r)
                 for r in self.dim_centres
                 if _centre_id(r) and _norm_text(r.get("region") or r.get("libelle_region")) == target
+            }
+            out = [r for r in out if _centre_id(r) in allowed_centres]
+        if zones:
+            # Les zones du tableau de bord correspondent aux libellés
+            # uniformisés des centres dans les artefacts ML.
+            selected = {_norm_text(zone) for zone in zones if str(zone).strip()}
+            allowed_centres = {
+                _centre_id(r)
+                for r in self.dim_centres
+                if _centre_id(r) and _norm_text(
+                    r.get("lib_centre_uniformise") or r.get("lib_centre")
+                    or r.get("label") or r.get("nom")
+                ) in selected
             }
             out = [r for r in out if _centre_id(r) in allowed_centres]
         if cible:
@@ -178,6 +192,24 @@ class PredictionService:
         if annee is not None:
             out = [r for r in out if int(r.get("annee", 0) or 0) == int(annee)]
         return out
+
+    def get_liste_installations(self) -> List[Dict]:
+        """Liste les installations avec leur capacité mensuelle disponible.
+
+        ``capacite_max_m3`` est la plus petite capacité positive observée sur
+        l'horizon mensuel ; elle sert de borne sûre pour une capacité imposée.
+        """
+        capacites: Dict[str, List[float]] = {}
+        for row in self.mensuelles:
+            installation = str(row.get("installation") or "").strip()
+            capacite = _to_float(row.get("capacite_m3"))
+            if installation and capacite is not None and capacite > 0:
+                capacites.setdefault(installation, []).append(capacite)
+        return [
+            {"id": installation, "label": installation,
+             "capacite_max_m3": round(min(valeurs), 2)}
+            for installation, valeurs in sorted(capacites.items())
+        ]
 
     # ------------------------------------------------------------ previsions DR
     def get_previsions_par_dr(self, dr_id: Optional[str] = None,

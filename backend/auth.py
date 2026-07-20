@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import jwt
 import bcrypt
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 from sqlalchemy.orm import sessionmaker, Session
 import os
 from dotenv import load_dotenv
@@ -20,14 +21,24 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1008
 
 # Configuration PostgreSQL
 POSTGRES_CONFIG = {
-    "host": os.getenv("DB_HOST", "localhost"),
-    "port": int(os.getenv("DB_PORT", "5432")),
-    "database": os.getenv("DB_NAME", "onee_db"),
-    "user": os.getenv("DB_USER", "postgres"),
-    "password": os.getenv("DB_PASSWORD", "2012")
+    "host": os.getenv("POSTGRES_HOST", os.getenv("DB_HOST", "localhost")),
+    "port": int(os.getenv("POSTGRES_PORT", os.getenv("DB_PORT", "5432"))),
+    "database": os.getenv("POSTGRES_DB", os.getenv("DB_NAME", "onee_db")),
+    "user": os.getenv("POSTGRES_USER", os.getenv("DB_USER", "postgres")),
+    "password": os.getenv("POSTGRES_PASSWORD", os.getenv("DB_PASSWORD", "2012"))
 }
 
-DATABASE_URL = f"postgresql://{POSTGRES_CONFIG['user']}:{POSTGRES_CONFIG['password']}@{POSTGRES_CONFIG['host']}:{POSTGRES_CONFIG['port']}/{POSTGRES_CONFIG['database']}"
+# Construire l'URL évite aussi les erreurs si un mot de passe contient des
+# caractères réservés ("@", ":", "/", etc.). Cette configuration est la même
+# que celle utilisée par l'API métier dans backend.app.config.
+DATABASE_URL = URL.create(
+    "postgresql+psycopg2",
+    username=POSTGRES_CONFIG["user"],
+    password=POSTGRES_CONFIG["password"],
+    host=POSTGRES_CONFIG["host"],
+    port=POSTGRES_CONFIG["port"],
+    database=POSTGRES_CONFIG["database"],
+)
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine)
 

@@ -12,6 +12,5 @@ python-multipart
 sqlalchemy 
 asyncpg 
 psycopg2-binary 
-pyodbc 
 bcrypt 
 PyJWT 

@@ -52,14 +52,6 @@ class DashboardAnalyticsService:
         taux_data = [data_by_year.get(y, None) for y in years]
         
         # Ajouter une prédiction pour les années manquantes
-        last_real_idx = len([x for x in taux_data if x is not None]) - 1
-        if last_real_idx >= 2:
-            recent = [x for x in taux_data if x is not None][-3:]
-            if len(recent) >= 2:
-                trend = (recent[-1] - recent[0]) / len(recent)
-                for i in range(last_real_idx + 1, len(taux_data)):
-                    if taux_data[i-1]:
-                        taux_data[i] = round(taux_data[i-1] + trend, 1)
         
         return {
             "labels": [str(y) for y in years],
@@ -113,14 +105,6 @@ class DashboardAnalyticsService:
         rendement_data = [data_by_year.get(y, None) for y in years]
         
         # Ajouter une prédiction
-        last_real_idx = len([x for x in rendement_data if x is not None]) - 1
-        if last_real_idx >= 2:
-            recent = [x for x in rendement_data if x is not None][-3:]
-            if len(recent) >= 2:
-                trend = (recent[-1] - recent[0]) / len(recent)
-                for i in range(last_real_idx + 1, len(rendement_data)):
-                    if rendement_data[i-1]:
-                        rendement_data[i] = round(rendement_data[i-1] + trend, 1)
         
         return {
             "labels": [str(y) for y in years],
@@ -306,15 +290,6 @@ class DashboardAnalyticsService:
         dot_brute_data = [data_brute.get(y, None) for y in years]
         
         # Ajouter des prédictions
-        for data in [dot_nette_data, dot_brute_data]:
-            last_real_idx = len([x for x in data if x is not None]) - 1
-            if last_real_idx >= 2:
-                recent = [x for x in data if x is not None][-3:]
-                if len(recent) >= 2:
-                    trend = (recent[-1] - recent[0]) / len(recent)
-                    for i in range(last_real_idx + 1, len(data)):
-                        if data[i-1]:
-                            data[i] = round(data[i-1] + trend, 1)
         
         return {
             "labels": [str(y) for y in years],

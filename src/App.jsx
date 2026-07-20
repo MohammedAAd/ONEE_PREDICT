@@ -3,17 +3,15 @@ import ErrorBoundary from './components/ErrorBoundary';
 import Topbar from './components/Topbar';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
-import Consommation from './pages/Consommation';
 import Production from './pages/Production';
 import Bilan from './pages/Bilan';
 //import DonneesManquantes from './pages/DonneesManquantes';
 import Architecture from './pages/Architecture';
 import Scenarios from './pages/Scenarios';
 import Prediction from './pages/Prediction';
-import Prediction_Y from './pages/Prediction_Y';
-import Tables from './pages/Tables';
 import AdminUsers from './pages/AdminUsers';
 import './styles/global.css';
+import { Droplets } from 'lucide-react';
 
 // Intégration de ONEPO AI : enveloppe l'app et affiche le widget de chat.
 import { OnepoProvider } from './onepo/OnepoProvider';
@@ -23,35 +21,17 @@ import OnepoWidget from './onepo/OnepoWidget';
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
-  const [activePage, setActivePage] = useState('prediction');
+  // Le tableau de bord est le point d'entrée de toute nouvelle session.
+  const [activePage, setActivePage] = useState('dashboard');
   const [region, setRegion] = useState('TTA — Tanger-Tétouan');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true); // Ajout d'un état de chargement
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    const user = localStorage.getItem('user');
-
-    setIsAuthenticated(true);
-    //setCurrentUser(parsedUser);
-    
-    // Vérifier si le token existe ET est valide (vous pouvez ajouter une vérification d'expiration)
-    if (token && user) {
-      try {
-        const parsedUser = JSON.parse(user);
-        // Optionnel: vérifier si le token n'est pas expiré
-        // const tokenData = JSON.parse(atob(token.split('.')[1]));
-        // if (tokenData.exp * 1000 > Date.now()) {
-          setIsAuthenticated(true);
-          setCurrentUser(parsedUser);
-        // }
-      } catch (e) {
-        // Token invalide, on reste sur la page de login
-        console.error('Token invalide', e);
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-      }
-    }
+    // La plateforme présente toujours l'écran de connexion au démarrage.
+    // Cela évite d'ouvrir directement une session précédente sur un poste partagé.
+    setIsAuthenticated(false);
+    setCurrentUser(null);
     
     // Récupérer le thème sauvegardé
     const savedTheme = localStorage.getItem('darkMode');
@@ -70,7 +50,22 @@ function App() {
     setIsLoading(false); // Fin du chargement
   }, []);
 
+  useEffect(() => {
+    const labels = {
+      dashboard: 'Tableau de bord',
+      prediction: 'Modèle IA',
+      scenarios: 'Scénarios',
+      simulation: 'Simulation avancée',
+      production: 'Production mensuelle',
+      bilan: 'Bilan ressource',
+      users: 'Utilisateurs',
+    };
+    document.title = `${labels[activePage] || 'ONEE Predict'} — ONEE Predict`;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [activePage]);
+
   const handleLogin = (user) => {
+    setActivePage('dashboard');
     setIsAuthenticated(true);
     setCurrentUser(user);
   };
@@ -97,15 +92,13 @@ function App() {
   const renderPage = () => {
     switch(activePage) {
       case 'dashboard': return <Dashboard region={region} />;
-      case 'consommation': return <Consommation />;
       case 'production': return <Production />;
       case 'bilan': return <Bilan />;
       // case 'manquant': return <DonneesManquantes />;
       case 'architecture': return <Architecture />;
-      case 'scenarios': return <Scenarios />;
+      case 'scenarios': return <Scenarios view="prepared" />;
+      case 'simulation': return <Scenarios view="advanced" />;
       case 'prediction': return <Prediction />;
-      case 'prediction_y': return <Prediction_Y />;
-      case 'tables': return <Tables />;
       case 'users': return currentUser?.is_admin ? <AdminUsers /> : <Dashboard region={region} />;
       default: return <Dashboard region={region} />;
     }
@@ -114,14 +107,11 @@ function App() {
   // Afficher un écran de chargement pendant la vérification
   if (isLoading) {
     return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        backgroundColor: isDarkMode ? '#1a1a1a' : '#ffffff'
-      }}>
-        <div className="spinner"></div>
+      <div className="app-loading" aria-live="polite" aria-label="Chargement de ONEE Predict">
+        <div className="app-loading-mark"><Droplets size={25} /></div>
+        <div className="app-loading-title">ONEE <em>Predict</em></div>
+        <div className="app-loading-text">Préparation de votre espace de pilotage</div>
+        <div className="app-loading-progress"><span /></div>
       </div>
     );
   }

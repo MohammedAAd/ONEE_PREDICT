@@ -199,6 +199,21 @@ class ProductionService:
         return [round(v, 3) for v in serie]
 
     @staticmethod
+    def _build_model_monthly_series(rows: List[Dict[str, Any]], year: int, field: str) -> List[float]:
+        """Agrège les sorties mensuelles du modèle, sans conversion d'unité."""
+        serie = [0.0] * 12
+        for r in rows:
+            try:
+                if int(r.get("annee") or 0) != int(year):
+                    continue
+                mois = int(r.get("mois") or 0)
+                if 1 <= mois <= 12:
+                    serie[mois - 1] += float(r.get(field) or 0.0)
+            except (TypeError, ValueError):
+                continue
+        return [round(v, 1) for v in serie]
+
+    @staticmethod
     def _compute_model_installation_stats(rows: List[Dict[str, Any]], year: int) -> Dict[str, Dict[str, Any]]:
         agg: Dict[str, Dict[str, Any]] = {}
         for r in rows:
@@ -256,7 +271,18 @@ class ProductionService:
         if installation_id:
             query_hist = text(
                 """
-                SELECT pm.mois, SUM(pm.volume_produit_traite) AS volume
+                SELECT
+                    pm.mois,
+                    SUM(pm.volume_produit_traite) AS volume,
+                    SUM(
+                        CASE WHEN pm."taux_d'utilisation" > 0 THEN
+                            pm.volume_produit_traite /
+                            CASE WHEN pm."taux_d'utilisation" > 1.5
+                                THEN pm."taux_d'utilisation" / 100.0
+                                ELSE pm."taux_d'utilisation"
+                            END
+                        ELSE 0 END
+                    ) AS capacite_estimee
                 FROM production_mensuelle pm
                 WHERE pm.année = :year_str
                   AND pm.installation = :installation_id
@@ -275,7 +301,18 @@ class ProductionService:
                     WHERE mp.code_region_12 = :region
                         AND mp.annee = 2024
                 )
-                SELECT pm.mois, SUM(pm.volume_produit_traite) AS volume
+                SELECT
+                    pm.mois,
+                    SUM(pm.volume_produit_traite) AS volume,
+                    SUM(
+                        CASE WHEN pm."taux_d'utilisation" > 0 THEN
+                            pm.volume_produit_traite /
+                            CASE WHEN pm."taux_d'utilisation" > 1.5
+                                THEN pm."taux_d'utilisation" / 100.0
+                                ELSE pm."taux_d'utilisation"
+                            END
+                        ELSE 0 END
+                    ) AS capacite_estimee
                 FROM production_mensuelle pm
                 JOIN region_installations ri ON ri.installation = pm.installation
                 WHERE pm.année = :year_str
@@ -287,7 +324,18 @@ class ProductionService:
         else:
             query_hist = text(
                 """
-                SELECT pm.mois, SUM(pm.volume_produit_traite) AS volume
+                SELECT
+                    pm.mois,
+                    SUM(pm.volume_produit_traite) AS volume,
+                    SUM(
+                        CASE WHEN pm."taux_d'utilisation" > 0 THEN
+                            pm.volume_produit_traite /
+                            CASE WHEN pm."taux_d'utilisation" > 1.5
+                                THEN pm."taux_d'utilisation" / 100.0
+                                ELSE pm."taux_d'utilisation"
+                            END
+                        ELSE 0 END
+                    ) AS capacite_estimee
                 FROM production_mensuelle pm
                 WHERE pm.année = :year_str
                 GROUP BY pm.mois
@@ -300,10 +348,12 @@ class ProductionService:
         rows_hist = result_hist.fetchall()
 
         historique = [0.0] * 12
+        capacite_historique = [0.0] * 12
         for row in rows_hist:
             idx = int(row.mois) - 1 if row.mois else 0
             if 0 <= idx < 12:
                 historique[idx] = float(row.volume or 0.0) / 1_000_000
+                capacite_historique[idx] = float(row.capacite_estimee or 0.0)
 
         model_rows = self._load_model_mensuelles()
         model_filtered = model_rows
@@ -321,25 +371,59 @@ class ProductionService:
             ]
 
         model_years = sorted(self._mensuelles_years_cache or set())
-        pred_source_year = year
+        model_installations = {
+            str(row.get("installation") or "").strip()
+            for row in model_filtered
+            if str(row.get("installation") or "").strip()
+        }
         pred_warning = None
-        if model_years and year not in model_years:
-            pred_source_year = min(model_years, key=lambda y: abs(y - year))
+        if year not in model_years:
+            prediction = [0.0] * 12
             pred_warning = (
-                f"Projection ML indisponible pour {year}. "
-                f"Affichage de la projection disponible la plus proche ({pred_source_year})."
+                f"Aucune projection mensuelle du modèle n'est livrée pour {year}. "
+                f"Années ML disponibles : {', '.join(map(str, model_years)) or 'aucune'}."
             )
+        elif not model_installations:
+            prediction = [0.0] * 12
+            pred_warning = (
+                "Aucune installation de cette région n'est reliée aux sorties du modèle mensuel."
+            )
+        else:
+            prediction = self._build_model_prediction(model_filtered, year)
 
-        prediction = self._build_model_prediction(model_filtered, pred_source_year)
+        volume_cible_modele = self._build_model_monthly_series(model_filtered, year, "volume_cible")
+        capacite_modele = self._build_model_monthly_series(model_filtered, year, "capacite_m3")
+        has_model_capacity = any(value > 0 for value in capacite_modele)
+        if has_model_capacity:
+            volume_cible_m3 = volume_cible_modele
+            capacite_m3 = capacite_modele
+            capacite_source = "modele_ml"
+        else:
+            # Pour une année historique, le volume traité est la valeur observée.
+            # La capacité est reconstituée uniquement depuis le taux d'utilisation
+            # enregistré : capacité = volume traité / taux d'utilisation.
+            volume_cible_m3 = [round(value * 1_000_000, 1) for value in historique]
+            capacite_m3 = [round(value, 1) for value in capacite_historique]
+            capacite_source = "historique" if any(capacite_m3) else "indisponible"
+        saturation_pct = [
+            round((volume / capacite) * 100, 1) if capacite > 0 else None
+            for volume, capacite in zip(volume_cible_m3, capacite_m3)
+        ]
 
         return {
             "labels": months,
             "historique": [round(v, 3) for v in historique],
             "prediction": prediction,
             "year": year,
-            "pred_year": pred_source_year,
-            "pred_label": f"Projection modèle (données ML {pred_source_year})",
+            "pred_year": year,
+            "pred_label": f"Projection modèle (données ML {year})",
             "pred_warning": pred_warning,
+            "model_years": model_years,
+            "model_installations": len(model_installations),
+            "volume_cible_m3": volume_cible_m3,
+            "capacite_m3": capacite_m3,
+            "saturation_pct": saturation_pct,
+            "capacite_source": capacite_source,
         }
 
     async def get_installations(
@@ -376,7 +460,6 @@ class ProductionService:
                    AND pm.année = :year_str
                 GROUP BY ip.installation, ip.lib_centre_prod_gde, ip.id_dr, ip.debit_exploitable, ip.debit_equipe
                 ORDER BY ip.installation
-                LIMIT 100
                 """
             )
             params = {"region": region, "year_str": year_str}
@@ -396,7 +479,6 @@ class ProductionService:
                    AND pm.année = :year_str
                 GROUP BY ip.installation, ip.lib_centre_prod_gde, ip.id_dr, ip.debit_exploitable, ip.debit_equipe
                 ORDER BY ip.installation
-                LIMIT 100
                 """
             )
             params = {"year_str": year_str}
@@ -510,13 +592,59 @@ class ProductionService:
         result = await self.db.execute(query, params)
         row = result.first()
 
+        historique_volume = self._to_float_or_zero(row.volume_total if row else None)
+        if historique_volume > 0:
+            return {
+                "installations": row.nb_installations or 0,
+                "model_installations": 0,
+                "volumeYear": round(historique_volume, 1),
+                "volume2024": round(historique_volume, 1),
+                "taux_util": round(row.taux_util_moyen or 0, 1),
+                "saturation": int(row.nb_saturation or 0),
+                "saturation2028": int(row.nb_saturation or 0),
+                "source": "historique",
+            }
+
+        model_rows = self._load_model_mensuelles()
+        if region is not None:
+            region_installations = set(await self._get_region_installations(region, year))
+            model_rows = [
+                item for item in model_rows
+                if str(item.get("installation") or "").strip() in region_installations
+            ]
+        model_rows = [
+            item for item in model_rows
+            if int(item.get("annee") or 0) == int(year)
+        ]
+        model_stats = self._compute_model_installation_stats(model_rows, year)
+
+        if model_stats:
+            volume_modele = sum(self._to_float_or_zero(item.get("volume_cible")) for item in model_rows)
+            taux = [item["taux"] for item in model_stats.values()]
+            saturations = sum(
+                1 for item in model_stats.values()
+                if item["taux"] > 85 or item["sat_any"]
+            )
+            return {
+                "installations": row.nb_installations if row and row.nb_installations else len(model_stats),
+                "model_installations": len(model_stats),
+                "volumeYear": round(volume_modele / 1_000_000, 1),
+                "volume2024": round(volume_modele / 1_000_000, 1),
+                "taux_util": round(sum(taux) / len(taux), 1),
+                "saturation": saturations,
+                "saturation2028": saturations,
+                "source": "modele_ml",
+            }
+
         return {
-            "installations": row.nb_installations or 0,
-            "volumeYear": f"{round(row.volume_total or 0, 1)} M",
-            "volume2024": f"{round(row.volume_total or 0, 1)} M",
-            "taux_util": round(row.taux_util_moyen or 0, 1),
-            "saturation": int(row.nb_saturation or 0),
-            "saturation2028": int(row.nb_saturation or 0),
+            "installations": row.nb_installations if row else 0,
+            "model_installations": 0,
+            "volumeYear": None,
+            "volume2024": None,
+            "taux_util": None,
+            "saturation": None,
+            "saturation2028": None,
+            "source": "indisponible",
         }
 
     async def get_available_years(self) -> List[int]:

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Globe, ChevronDown, ChevronUp, RefreshCw, Calendar, Filter, Building2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Globe, ChevronDown, ChevronUp, RefreshCw, Calendar, Filter, Building2, Droplets, Gauge } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import { useChart } from '../hooks/useChart';
 import { chartColors, chartOptions } from '../utils/chartConfig';
@@ -26,6 +26,7 @@ const Production = () => {
   const [selectedRegion, setSelectedRegion] = useState({ code: 'all', name: 'Toutes les régions' });
   const [selectedYear, setSelectedYear] = useState(2024);
   const [selectedInstallation, setSelectedInstallation] = useState(null);
+  const monthlyRequestRef = useRef(0);
   
   // 🔄 Récupérer la liste des régions
   useEffect(() => {
@@ -47,6 +48,8 @@ const Production = () => {
 
   // 📊 API 1: Production mensuelle
   const fetchMonthlyData = useCallback(async () => {
+    const requestId = ++monthlyRequestRef.current;
+    setMonthlyData(null);
     try {
       const params = new URLSearchParams({
         region: selectedRegion.code,
@@ -58,7 +61,8 @@ const Production = () => {
       const response = await fetch(`${API_BASE}/production/monthly?${params}`);
       if (!response.ok) throw new Error('Erreur chargement production mensuelle');
       const data = await response.json();
-      setMonthlyData(data);
+      // Ignore une réponse plus ancienne si le filtre année a changé entre-temps.
+      if (requestId === monthlyRequestRef.current) setMonthlyData(data);
     } catch (err) {
       console.error("❌ Erreur monthly:", err);
     }
@@ -151,6 +155,7 @@ const Production = () => {
   // Handlers
   const handleRegionChange = (region) => {
     setSelectedRegion(region);
+    setSelectedInstallation(null);
     setIsRegionDropdownOpen(false);
   };
 
@@ -178,6 +183,17 @@ const Production = () => {
     () => (Array.isArray(monthly.prediction) ? monthly.prediction.some(v => (v || 0) > 0) : false),
     [monthly.prediction]
   );
+  const hasHistoricalData = useMemo(
+    () => (Array.isArray(monthly.historique) ? monthly.historique.some(v => (v || 0) > 0) : false),
+    [monthly.historique]
+  );
+  const volumeCibleM3 = Array.isArray(monthly.volume_cible_m3) ? monthly.volume_cible_m3 : Array(12).fill(0);
+  const capaciteM3 = Array.isArray(monthly.capacite_m3) ? monthly.capacite_m3 : Array(12).fill(0);
+  const saturationPct = Array.isArray(monthly.saturation_pct) ? monthly.saturation_pct : Array(12).fill(null);
+  const hasCapacityForecast = capaciteM3.some((value) => Number(value) > 0);
+  const capacitySource = monthly.capacite_source || 'indisponible';
+  const capacityIsModel = capacitySource === 'modele_ml';
+  const targetLabel = capacityIsModel ? 'Volume cible (modèle)' : 'Volume traité réel';
   const monthlyRisk = useMemo(() => {
     const hist = Array.isArray(monthly.historique) ? monthly.historique : [];
     const pred = Array.isArray(monthly.prediction) ? monthly.prediction : [];
@@ -202,6 +218,20 @@ const Production = () => {
         : 'Aucun mois critique détecté sur les 12 prochains mois.',
     };
   }, [monthly.historique, monthly.prediction, monthly.pred_warning]);
+
+  const historicalSummary = useMemo(() => {
+    const values = Array.isArray(monthly.historique) ? monthly.historique : [];
+    const populated = values.filter((value) => Number(value) > 0);
+    if (!populated.length) return { average: 0, peakMonth: null, peakValue: 0 };
+    const peakIndex = values.reduce((best, value, index) => (
+      Number(value) > Number(values[best] || 0) ? index : best
+    ), 0);
+    return {
+      average: populated.reduce((sum, value) => sum + Number(value), 0) / populated.length,
+      peakMonth: MONTHS[peakIndex],
+      peakValue: Number(values[peakIndex] || 0),
+    };
+  }, [monthly.historique]);
   
   useChart('prodMonthChart', {
     type: 'line',
@@ -215,13 +245,13 @@ const Production = () => {
           backgroundColor: chartColors.teal + '15',
           fill: true, tension: 0.4, pointRadius: 3
         },
-        {
+        ...(hasPrediction ? [{
           label: `${monthly.pred_label || `${monthly.pred_year}`} (projection)`,
-          data: hasPrediction ? (monthly.prediction || []) : Array(12).fill(null),
+          data: monthly.prediction || [],
           borderColor: chartColors.amber,
           backgroundColor: chartColors.amber + '10',
           fill: true, tension: 0.4, pointRadius: 3, borderDash: [5, 5]
-        }
+        }] : [])
       ]
     },
     options: { 
@@ -231,10 +261,47 @@ const Production = () => {
         legend: { display: true, labels: { color: '#8ba8cc', boxWidth: 10, font: { size: 10 } } } 
       } 
     }
-  }, !loading);
+  }, !loading && (hasPrediction || hasHistoricalData));
+
+  useChart('targetCapacityChart', {
+    type: 'bar',
+    data: {
+      labels: MONTHS,
+      datasets: [
+        { label: targetLabel, data: volumeCibleM3, backgroundColor: chartColors.blue + 'cc', borderRadius: 4 },
+        { label: 'Capacité disponible', data: capaciteM3, backgroundColor: chartColors.teal + 'cc', borderRadius: 4 },
+      ],
+    },
+    options: {
+      ...chartOptions,
+      plugins: { ...chartOptions.plugins, legend: { display: true, labels: { color: '#8ba8cc', boxWidth: 10, font: { size: 10 } } } },
+      scales: { y: { title: { display: true, text: 'Volume (m³)', color: '#8ba8cc', font: { size: 10 } } } },
+    },
+  }, !loading && hasCapacityForecast);
+
+  useChart('saturationMonthChart', {
+    type: 'line',
+    data: {
+      labels: MONTHS,
+      datasets: [{
+        label: 'Taux de saturation', data: saturationPct, borderColor: chartColors.red,
+        backgroundColor: chartColors.red + '15', fill: true, tension: 0.4, pointRadius: 3,
+      }],
+    },
+    options: {
+      ...chartOptions,
+      plugins: {
+        ...chartOptions.plugins,
+        tooltip: { callbacks: { label: (ctx) => ctx.raw == null ? 'Non disponible' : `${ctx.raw.toFixed(1)} %` } },
+        legend: { display: true, labels: { color: '#8ba8cc', boxWidth: 10, font: { size: 10 } } },
+      },
+      scales: { y: { min: 0, title: { display: true, text: 'Taux de saturation (%)', color: '#8ba8cc', font: { size: 10 } } } },
+    },
+  }, !loading && hasCapacityForecast);
 
   const installations = installationsData;
   const stats = statsData;
+  const statsFromModel = stats.source === 'modele_ml';
 
   const getStatusClass = (status) => ({
     ok: 'chip ok', warn: 'chip warn', deficit: 'chip deficit', info: 'chip info'
@@ -414,29 +481,44 @@ const Production = () => {
       {/* Statistiques */}
       <div className="stats-grid">
         <StatCard type="teal" label="Installations actives" value={stats.installations || "0"} unit="dans le périmètre" />
-        <StatCard type="blue" label={`Volume produit ${selectedYear}`} value={stats.volumeYear || stats.volume2024 || "0 M"} unit="m³/an" />
-        <StatCard type="amber" label="Taux utilisation moy." value={stats.taux_util ? `${stats.taux_util} %` : "0 %"} unit="volume traité / exploitable" />
-        <StatCard type="red" label={`Installations en saturation ${selectedYear}`} value={stats.saturation || stats.saturation2028 || "0"} unit="taux d'utilisation > 85 %" />
+        <StatCard type="blue" label={statsFromModel ? `Volume projeté ML ${selectedYear}` : `Volume produit ${selectedYear}`} value={stats.volumeYear ?? stats.volume2024 ?? "—"} unit={statsFromModel ? "Mm³/an (modèle)" : "Mm³/an"} />
+        <StatCard type="amber" label={statsFromModel ? "Taux projeté ML moy." : "Taux utilisation moy."} value={stats.taux_util != null ? `${stats.taux_util} %` : "—"} unit={statsFromModel ? "volume modèle / capacité" : "volume traité / exploitable"} />
+        <StatCard type="red" label={statsFromModel ? `Saturations projetées ML ${selectedYear}` : `Installations en saturation ${selectedYear}`} value={stats.saturation ?? stats.saturation2028 ?? "—"} unit="taux d'utilisation > 85 %" />
+      </div>
+
+      <div className={`production-model-status${hasPrediction ? ' available' : ' unavailable'}`}>
+        <div className="production-model-status-title">
+          {hasPrediction ? 'Projection mensuelle ML disponible' : 'Projection mensuelle ML indisponible pour ce périmètre'}
+        </div>
+        <div className="production-model-status-text">
+          {hasPrediction
+            ? `${monthly.model_installations || 0} installation(s) de ${selectedRegion.name} sont couvertes par les sorties du modèle pour ${selectedYear}.`
+            : monthly.pred_warning || `Aucune sortie mensuelle du modèle n'est disponible pour ${selectedYear}.`}
+        </div>
       </div>
 
       <div className="card" style={{ marginBottom: '24px', borderLeft: '4px solid var(--amber)' }}>
         <div className="card-header" style={{ paddingBottom: '10px' }}>
           <div>
-            <div className="card-title" style={{ fontSize: '1rem' }}>Optimisation 12 mois</div>
+            <div className="card-title" style={{ fontSize: '1rem' }}>{hasPrediction ? 'Optimisation 12 mois' : `Analyse historique ${selectedYear}`}</div>
             <div className="card-sub">Repérage des mois sensibles et aide à la planification</div>
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', padding: '0 0 16px' }}>
+        <div className="production-summary-grid" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px', padding: '0 0 16px' }}>
           <div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text2)', marginBottom: '6px' }}>Projection mensuelle moyenne</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text2)', marginBottom: '6px' }}>{hasPrediction ? 'Projection mensuelle moyenne' : 'Production mensuelle moyenne'}</div>
             <div style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--text)' }}>
-              {monthlyRisk ? formatMm3(monthlyRisk.average) : 'N/A'}
+              {hasPrediction ? formatMm3(monthlyRisk.average) : formatMm3(historicalSummary.average)}
             </div>
           </div>
           <div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text2)', marginBottom: '6px' }}>Conclusion</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text2)', marginBottom: '6px' }}>{hasPrediction ? 'Conclusion' : 'Mois le plus élevé'}</div>
             <div style={{ fontSize: '0.95rem', color: 'var(--text)', lineHeight: 1.6 }}>
-              {monthlyRisk ? monthlyRisk.message : 'Chargement des projections...'}
+              {hasPrediction
+                ? monthlyRisk.message
+                : historicalSummary.peakMonth
+                  ? `${historicalSummary.peakMonth} : ${formatMm3(historicalSummary.peakValue)}. La prévision mensuelle ML n'est disponible que pour 2024.`
+                  : 'Aucune production historique disponible pour ce filtre.'}
             </div>
           </div>
         </div>
@@ -456,15 +538,58 @@ const Production = () => {
             </div>
             <div className="legend">
               <div className="legend-item"><div className="legend-dot" style={{ background: chartColors.teal }}></div>{monthly.year} Historique</div>
-              <div className="legend-item"><div className="legend-dot" style={{ background: chartColors.amber }}></div>{monthly.pred_label || `${monthly.pred_year} Projection`}</div>
+              {hasPrediction && <div className="legend-item"><div className="legend-dot" style={{ background: chartColors.amber }}></div>{monthly.pred_label || `${monthly.pred_year} Projection`}</div>}
             </div>
           </div>
-          <canvas id="prodMonthChart" height="200"></canvas>
+          {hasPrediction || hasHistoricalData ? (
+            <canvas id="prodMonthChart" height="200"></canvas>
+          ) : (
+            <div className="production-model-empty">
+              <Calendar size={20} />
+              <div>
+                <strong>Pas de série à tracer pour ce filtre.</strong>
+                <span>{monthly.pred_warning || 'Choisissez une autre région, une installation reliée au modèle ou une année couverte.'}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="charts-row">
+        <div className="card chart-wide">
+          <div className="card-header">
+            <div>
+              <div className="card-title"><Droplets size={14} /> Volume cible mensuel vs capacité (m³)</div>
+              <div className="card-sub">
+                {capacityIsModel
+                  ? `Sorties mensuelles du modèle pour ${selectedYear} : besoin à couvrir et capacité disponible.`
+                  : `Données historiques ${selectedYear} : volume traité réel et capacité déduite du taux d'utilisation enregistré.`}
+              </div>
+            </div>
+          </div>
+          {hasCapacityForecast ? (
+            <canvas id="targetCapacityChart" height="200"></canvas>
+          ) : (
+            <div className="production-model-empty"><Calendar size={20} /><div><strong>Capacité mensuelle indisponible.</strong><span>{monthly.pred_warning || 'Aucune sortie mensuelle du modèle pour ce filtre.'}</span></div></div>
+          )}
+        </div>
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <div className="card-title"><Gauge size={14} /> Taux de saturation mensuel (%)</div>
+              <div className="card-sub">{capacityIsModel ? 'Volume cible' : 'Volume traité réel'} ÷ capacité disponible.</div>
+            </div>
+          </div>
+          {hasCapacityForecast ? (
+            <canvas id="saturationMonthChart" height="200"></canvas>
+          ) : (
+            <div className="production-model-empty"><Calendar size={20} /><div><strong>Taux non calculable.</strong><span>La capacité mensuelle est nécessaire.</span></div></div>
+          )}
         </div>
       </div>
 
       {/* Tableau Installations */}
-      <div className="card">
+      <div className="card" style={{ display: 'none' }}>
         <div className="card-header">
           <div className="card-title">Installations — Taux d'utilisation annuel</div>
           <div className="card-sub">{selectedRegion.name}</div>
@@ -479,7 +604,7 @@ const Production = () => {
                 <th>Débit exploitable (m³/h)</th>
                 <th>Débit équipé (m³/h)</th>
                 <th>Débit utilisé (m³/h)</th>
-                <th>Taux util. {selectedYear}</th>
+                <th>{statsFromModel ? `Taux réel ${selectedYear}` : `Taux util. ${selectedYear}`}</th>
                 <th>Taux projeté modèle ({selectedYear})</th>
                 <th>Statut</th>
               </tr>
@@ -493,8 +618,8 @@ const Production = () => {
                   <td className="mono">{inst.debitExploitable || 0}</td>
                   <td className="mono">{inst.debitEquipe || 0}</td>
                   <td className="mono">{inst.debit || 0}</td>
-                  <td className="mono">{inst.taux2024} %</td>
-                  <td className="mono">{inst.tauxForecast ?? inst.taux2028 ?? 0} %</td>
+                  <td className="mono">{statsFromModel && !inst.taux2024 ? '—' : `${inst.taux2024} %`}</td>
+                  <td className="mono">{inst.tauxForecast != null ? `${inst.tauxForecast} %` : '—'}</td>
                   <td><span className={getStatusClass(inst.status)}>{inst.statusText}</span></td>
                 </tr>
               ))}
@@ -504,6 +629,7 @@ const Production = () => {
       </div>
 
       <style>{`
+        .production-summary-grid > div:nth-child(2) { display: none; }
         .spin {
           animation: spin 1s linear infinite;
         }
@@ -535,6 +661,40 @@ const Production = () => {
         .dropdown-item:hover {
           background: var(--bg2);
         }
+        .production-model-status {
+          margin: 0 0 20px;
+          padding: 12px 14px;
+          border-left: 4px solid;
+          border-radius: 8px;
+          background: var(--bg2);
+        }
+        .production-model-status.available { border-color: #00c9a7; }
+        .production-model-status.unavailable { border-color: #f5a623; }
+        .production-model-status-title {
+          margin-bottom: 4px;
+          font-size: 0.86rem;
+          font-weight: 700;
+          color: var(--text);
+        }
+        .production-model-status-text {
+          color: var(--text2);
+          font-size: 0.8rem;
+          line-height: 1.4;
+        }
+        .production-model-empty {
+          min-height: 180px;
+          padding: 24px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          color: var(--text2);
+          text-align: left;
+        }
+        .production-model-empty strong,
+        .production-model-empty span { display: block; }
+        .production-model-empty strong { color: var(--text); margin-bottom: 5px; }
+        .production-model-empty span { max-width: 600px; font-size: 0.82rem; line-height: 1.4; }
       `}</style>
     </div>
   );

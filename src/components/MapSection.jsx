@@ -11,6 +11,7 @@ const STATUS_CONFIG = {
   ok:      { color: '#00c9a7', bg: '#00c9a722', label: 'Normal',  icon: CheckCircle },
   warn:    { color: '#f59e0b', bg: '#f59e0b22', label: 'Tension', icon: AlertTriangle },
   deficit: { color: '#ef4444', bg: '#ef444422', label: 'Déficit', icon: XCircle },
+  unknown: { color: '#94a3b8', bg: '#94a3b822', label: 'Bilan indisponible', icon: AlertTriangle },
 };
 
 const INSTALL_TYPE_CONFIG = {
@@ -158,6 +159,7 @@ const resolveCentreCoordinates = (centre, index = 0) => {
 };
 
 const formatMetric = (value, digits = 0) => {
+  if (value === null || value === undefined || value === '') return '-';
   const num = Number(value);
   if (!Number.isFinite(num)) return '-';
   return num.toLocaleString('fr-FR', { maximumFractionDigits: digits });
@@ -436,7 +438,7 @@ const MapSection = ({ vulnerability, masterCentres }) => {
     const status = centre?.status || 'ok';
     acc[status] = (acc[status] || 0) + 1;
     return acc;
-  }, { ok: 0, warn: 0, deficit: 0 });
+  }, { ok: 0, warn: 0, deficit: 0, unknown: 0 });
   return (
     <div className="card" style={{ marginBottom: '24px' }}>
       {/* Header */}
@@ -446,7 +448,12 @@ const MapSection = ({ vulnerability, masterCentres }) => {
             <MapPin size={16} style={{ color: 'var(--primary)' }} />
             Carte — Centres desservis &amp; Installations
           </div>
-          <div className="card-sub">Vue géographique du réseau ONEE · Données réelles (master_panel 2024)</div>
+          <div className="card-sub">Vue géographique du réseau ONEE · Données réelles PostgreSQL</div>
+          {vulnerability?.dataQuality && (
+            <div className="card-sub" style={{ marginTop: '3px' }}>
+              {vulnerability.dataQuality.source} · année {vulnerability.dataQuality.year} · {vulnerability.dataQuality.centresAvecBilan} centres avec bilan exploitable
+            </div>
+          )}
         </div>
         {/* Stats rapides */}
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
@@ -600,6 +607,12 @@ const DetailPanel = ({ item, linkedCentre }) => {
         <span style={{ fontSize: '0.72rem', color: statusCfg.color, fontWeight: 600 }}>{statusCfg.label}</span>
       </div>
 
+      {isCentre && d.status === 'unknown' && Array.isArray(d.missing_fields) && d.missing_fields.length > 0 && (
+        <div style={{ marginBottom: '12px', padding: '8px 10px', borderRadius: 8, background: '#94a3b812', color: 'var(--text2)', fontSize: '0.72rem', lineHeight: 1.4 }}>
+          Bilan non calculable pour {d.data_year || 'l’année sélectionnée'} : {d.missing_fields.join(', ')} manquant(s). Les autres données affichées restent réelles.
+        </div>
+      )}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {isCentre ? (
           <>
@@ -608,8 +621,8 @@ const DetailPanel = ({ item, linkedCentre }) => {
             <InfoRow label="Population" value={formatMetric(d.population)} />
             <InfoRow label="Production" value={formatMetric(d.production)} />
             <InfoRow label="Consommation" value={formatMetric(d.consommation)} />
-            <InfoRow label="Rend. dist." value={`${Number(d.rend_distribution ?? d.rendDistribution ?? 0).toFixed(1)} %`} highlight />
-            <InfoRow label="Taux branchement" value={`${Number(d.taux_branchement ?? d.tauxBranchement ?? 0).toFixed(1)} %`} />
+            <InfoRow label="Rend. dist." value={d.rend_distribution ?? d.rendDistribution ? `${Number(d.rend_distribution ?? d.rendDistribution).toFixed(1)} %` : '-'} highlight />
+            <InfoRow label="Taux branchement" value={d.taux_branchement ?? d.tauxBranchement ? `${Number(d.taux_branchement ?? d.tauxBranchement).toFixed(1)} %` : '-'} />
             <InfoRow label="Score perf." value={`${Math.round(d.performanceScore ?? 0)} / 100`} />
             <div style={{ marginTop: '8px', fontSize: '0.78rem', color: 'var(--text2)' }}>
               Priorité de réhabilitation : {d.performanceScore < 60 ? 'Élevée' : d.performanceScore < 75 ? 'Moyenne' : 'Faible'}

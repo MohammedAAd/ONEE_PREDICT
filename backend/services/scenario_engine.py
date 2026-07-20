@@ -77,6 +77,41 @@ def baselines_centre(historique: List[Dict], centre_id: str) -> Dict:
             "croissance": _clamp(croissance, -0.05, 0.10)}
 
 
+def moyennes_parametres_centre(historique: List[Dict], centre_id: str) -> Dict[str, Optional[float]]:
+    """Calcule les paramètres initiaux d'un scénario à partir de l'historique.
+
+    Les taux peuvent être stockés en fraction (0.75) ou en pourcentage (75) :
+    ils sont tous renvoyés en pourcentage pour être injectés directement dans
+    les curseurs du front. Aucune valeur métier par défaut n'est substituée
+    lorsqu'une série est absente ; la valeur renvoyée est alors ``None``.
+    """
+    lignes = sorted(
+        [r for r in historique
+         if r.get("id_centre_desservi") == str(centre_id).strip() and r.get("annee")],
+        key=lambda r: r["annee"],
+    )
+
+    def moyenne_taux(champ: str) -> Optional[float]:
+        valeurs = [_frac(r.get(champ), 0.0) for r in lignes if r.get(champ) not in (None, 0)]
+        return round(statistics.mean(valeurs) * 100, 2) if valeurs else None
+
+    croissances = []
+    populations = [(r["annee"], r.get("population_interp")) for r in lignes
+                   if r.get("population_interp") and r.get("population_interp") > 0]
+    for (annee_precedente, pop_precedente), (annee, pop) in zip(populations, populations[1:]):
+        ecart = annee - annee_precedente
+        if ecart > 0 and pop_precedente > 0:
+            croissances.append((pop / pop_precedente) ** (1.0 / ecart) - 1.0)
+
+    return {
+        "taux_accroissement": round(statistics.mean(croissances) * 100, 2) if croissances else None,
+        "rendement_distribution": moyenne_taux("rend_distribution"),
+        "rendement_adduction": moyenne_taux("rend_adduction"),
+        "taux_branchement": moyenne_taux("taux_branchement"),
+        "nb_lignes_historique": len(lignes),
+    }
+
+
 def baselines_global(historique: List[Dict]) -> Dict:
     """Valeurs de reference nationales (moyennes) si aucun centre n'est cible."""
     par_centre: Dict[str, List[Dict]] = {}
@@ -121,9 +156,39 @@ def projeter_demande(service, p: Dict) -> Optional[Dict]:
     """Niveau Centre : projette la demande (baseline vs scenario) jusqu'a l'horizon."""
     cible = p.get("cible", "consommation_totale")
     centre_id = p.get("centre_id")
+    centre_ids = {str(cid).strip() for cid in p.get("centre_ids", []) if str(cid).strip()}
     horizon = int(p.get("annee_horizon") or 2054)
 
     rows = service.get_previsions_annuelles(centre_id=centre_id, cible=cible)
+    if centre_ids and not centre_id:
+        rows = [row for row in rows if str(row.get("id_centre_desservi") or row.get("centre_id") or "").strip() in centre_ids]
+
+    # Certains centres pilotes fournis par le client ne figurent pas encore
+    # dans les artefacts ML. On conserve alors un scénario exploitable en
+    # projetant leur dernière observation historique, au lieu de les mélanger
+    # silencieusement avec tous les centres du pays.
+    source = "prévisions ML"
+    if not rows and centre_ids:
+        historiques = [r for r in service.historique
+                        if r.get("id_centre_desservi") in centre_ids
+                        and r.get(cible) is not None and r.get("annee")]
+        derniers: Dict[str, Dict] = {}
+        for ligne in historiques:
+            cid = ligne["id_centre_desservi"]
+            if cid not in derniers or ligne["annee"] > derniers[cid]["annee"]:
+                derniers[cid] = ligne
+        if derniers:
+            source = "projection historique (centres absents des artefacts ML)"
+            base_2024 = sum(
+                float(ligne[cible]) * (1.0 + DEFAUT_CROISSANCE) ** max(0, 2024 - ligne["annee"])
+                for ligne in derniers.values()
+            )
+            rows = [
+                {"annee": annee, "q10": base_2024 * (1.0 + DEFAUT_CROISSANCE) ** (annee - 2024),
+                 "q50": base_2024 * (1.0 + DEFAUT_CROISSANCE) ** (annee - 2024),
+                 "q90": base_2024 * (1.0 + DEFAUT_CROISSANCE) ** (annee - 2024)}
+                for annee in range(2024, min(horizon, 2030) + 1)
+            ]
     if not rows:
         return None
 
@@ -163,6 +228,12 @@ def projeter_demande(service, p: Dict) -> Optional[Dict]:
     if cible == "production" and ra_scn > 0:
         f_rend *= bl["rend_adduction"] / ra_scn
 
+    # Leviers de planification : couche d'équilibre déterministe, distincte du ML.
+    dotation_factor = 1.0 + float(p.get("dotation_pct") or 0.0) / 100.0
+    tourisme_factor = 1.0 + float(p.get("tourisme_pct") or 0.0) / 100.0
+    industrie_m3_an = float(p.get("industrie_m3_an") or 0.0)
+    annee_industrie = int(p.get("annee_debut_industrie") or horizon + 1)
+
     annees = list(range(y0, horizon + 1))
     base = {"q10": [], "q50": [], "q90": []}
     scen = {"q10": [], "q50": [], "q90": []}
@@ -175,12 +246,16 @@ def projeter_demande(service, p: Dict) -> Optional[Dict]:
         tilt = ((1.0 + g_scn) / (1.0 + g_base)) ** (y - y0)
         for q in ("q10", "q50", "q90"):
             base[q].append(round(b[q], 1))
-            scen[q].append(round(b[q] * tilt * f_branch * f_rend, 1))
+            valeur_scenario = b[q] * tilt * f_branch * f_rend * dotation_factor * tourisme_factor
+            if y >= annee_industrie:
+                valeur_scenario += industrie_m3_an
+            scen[q].append(round(valeur_scenario, 1))
 
     return {
         "cible": cible,
         "centre_id": centre_id,
-        "perimetre": centre_id if centre_id else "Tous les centres",
+        "perimetre": centre_id if centre_id else (f"Groupe de {len(centre_ids)} centres" if centre_ids else "Tous les centres"),
+        "source": source,
         "annees": annees,
         "baseline": base,
         "scenario": scen,
@@ -193,6 +268,10 @@ def projeter_demande(service, p: Dict) -> Optional[Dict]:
             "rend_adduction_scenario": round(ra_scn, 3),
             "taux_branchement_base": round(bl["taux_branchement"], 3),
             "taux_branchement_scenario": round(tb_scn, 3),
+            "dotation_pct": round((dotation_factor - 1.0) * 100, 2),
+            "tourisme_pct": round((tourisme_factor - 1.0) * 100, 2),
+            "industrie_m3_an": industrie_m3_an,
+            "annee_debut_industrie": annee_industrie if industrie_m3_an else None,
         },
     }
 
@@ -200,9 +279,12 @@ def projeter_demande(service, p: Dict) -> Optional[Dict]:
 # =================================================================== NIVEAU 2
 def appliquer_capacite(service, p: Dict) -> Optional[Dict]:
     """Niveau Installation : recalcule capacite, saturation et marge (horizon m+12)."""
-    delta = p.get("delta_capacite_pct")
+    # Le delta effectif peut inclure un stress temporaire sur la ressource.
+    # La valeur manuelle reste intacte dans ``delta_capacite_pct`` pour assurer
+    # la traçabilité de l'hypothèse saisie par l'utilisateur.
+    delta = p.get("delta_capacite_effectif_pct", p.get("delta_capacite_pct"))
     cap_abs = p.get("capacite_absolue")
-    if delta is None and cap_abs is None:
+    if (delta is None or abs(float(delta)) < 1e-9) and cap_abs is None:
         return None
 
     rows = service.get_previsions_mensuelles(installation=p.get("installation"),
@@ -218,7 +300,10 @@ def appliquer_capacite(service, p: Dict) -> Optional[Dict]:
         # sinon volume_cible (deja plafonne -> peut sous-estimer le besoin reel).
         bes = float(r.get("q50_uncapped") or r.get("volume_cible") or 0)
         cb = float(r.get("capacite_m3") or 0)
-        cs = cap_abs if cap_abs is not None else cb * (1.0 + (delta or 0) / 100.0)
+        # La capacité imposée ne peut jamais dépasser la capacité exploitable
+        # disponible dans les artefacts mensuels.
+        cible = cap_abs if cap_abs is not None else cb * (1.0 + (delta or 0) / 100.0)
+        cs = max(0.0, min(cible, cb))
         mois.append(f"{int(r.get('annee', 0) or 0)}-{int(r.get('mois', 0) or 0):02d}")
         besoin.append(round(bes, 0))
         cap_b.append(round(cb, 0))
@@ -234,6 +319,7 @@ def appliquer_capacite(service, p: Dict) -> Optional[Dict]:
         "n_points": len(mois),
         "n_saturees_baseline": sat_b,
         "n_saturees_scenario": sat_s,
+        "capacite_bornee": cap_abs is not None and any(cap_abs > float(r.get("capacite_m3") or 0) for r in rows),
     }
 
 
@@ -274,7 +360,7 @@ def calculer_bilan(service, p: Dict) -> Dict:
         }
         for x in p.get("reaffectations", [])
     }
-    delta = p.get("delta_capacite_pct") or 0.0
+    delta = p.get("delta_capacite_effectif_pct", p.get("delta_capacite_pct")) or 0.0
     annee = p.get("annee_mensuel")
 
     rows = service.get_previsions_mensuelles(annee=annee)
@@ -331,14 +417,23 @@ def calculer_bilan(service, p: Dict) -> Dict:
         "reaffectation_disponible": has_dr,
         "n_reaffectations": len(reaffectations) if has_dr else 0,
         "delta_capacite_pct": delta,
+        "delta_capacite_manuel_pct": p.get("delta_capacite_pct") or 0.0,
         "capacite_additionnelle_m3": cap_add or 0.0,
-        "capacite_additionnelle_libelle": p.get("capacite_additionnelle_libelle") or ""
+        "capacite_additionnelle_libelle": p.get("capacite_additionnelle_libelle") or "",
+        "capacite_additionnelle_ulterieure_m3": p.get("capacite_additionnelle_ulterieure_m3") or 0.0,
+        "annee_debut_capacite_ulterieure": p.get("annee_debut_capacite_ulterieure"),
     }
 
 
 # ===================================================================== RUNNER
 def executer_scenario(service, p: Dict) -> Dict:
     """Point d'entree unique du moteur — renvoie les 3 niveaux d'un coup."""
+    p = dict(p)
+    indisponibilite = float(p.get("stress_ressource_pct") or 0.0) + float(p.get("maintenance_pct") or 0.0)
+    delta_manuel = float(p.get("delta_capacite_pct") or 0.0)
+    # Ce delta est utilisé pour l'année mensuelle observée. La trajectoire
+    # annuelle applique ensuite le stress seulement pendant sa durée déclarée.
+    p["delta_capacite_effectif_pct"] = max(-100.0, delta_manuel - indisponibilite)
     return {
         "parametres": p,
         "annuel": projeter_demande(service, p),     # niveau Centre  (demande)

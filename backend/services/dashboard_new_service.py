@@ -9,6 +9,14 @@ class DashboardNewService:
     
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    @staticmethod
+    def _zone_clause(zones: Optional[List[str]], alias: str = "mp") -> tuple[str, Dict[str, Any]]:
+        """Construit un filtre paramétré pour une ou plusieurs zones."""
+        cleaned = [str(zone).strip() for zone in (zones or []) if str(zone).strip()]
+        if not cleaned:
+            return "", {}
+        return f" AND {alias}.lib_centre_uniformise = ANY(:zones)", {"zones": cleaned}
     
     async def get_dashboard_data(
         self,
@@ -48,40 +56,56 @@ class DashboardNewService:
         region: Optional[int],  # Changé: str → Optional[int]
         start_year: int,
         end_year: int,
-        mode: str
+        mode: str,
+        zones: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Récupère la série temporelle consommation vs production"""
         
         years = list(range(start_year, end_year + 1))
+        zone_clause, zone_params = self._zone_clause(zones)
         
         if region is not None and region != "all":
             # region est un entier
-            query = text("""
+            query = text(f"""
                 SELECT 
                     mp.annee,
                     SUM(mp.production) as production,
                     SUM(mp.distribution) as distribution,
-                    SUM(mp.cons_pop_branchee) as consommation
+                    SUM(
+                        COALESCE(mp.cons_pop_branchee, 0)
+                        + COALESCE(mp.cons_bf, 0)
+                        + COALESCE(mp.cons_administrative, 0)
+                        + COALESCE(mp.cons_industrielle, 0)
+                        + COALESCE(mp.cons_autres, 0)
+                    ) as consommation
                 FROM master_panel mp
                 WHERE mp.code_region_12 = :region
                 AND mp.annee BETWEEN :start_year AND :end_year
+                {zone_clause}
                 GROUP BY mp.annee
                 ORDER BY mp.annee
             """)
-            params = {"region": region, "start_year": start_year, "end_year": end_year}
+            params = {"region": region, "start_year": start_year, "end_year": end_year, **zone_params}
         else:
-            query = text("""
+            query = text(f"""
                 SELECT 
                     mp.annee,
                     SUM(mp.production) as production,
                     SUM(mp.distribution) as distribution,
-                    SUM(mp.cons_pop_branchee) as consommation
+                    SUM(
+                        COALESCE(mp.cons_pop_branchee, 0)
+                        + COALESCE(mp.cons_bf, 0)
+                        + COALESCE(mp.cons_administrative, 0)
+                        + COALESCE(mp.cons_industrielle, 0)
+                        + COALESCE(mp.cons_autres, 0)
+                    ) as consommation
                 FROM master_panel mp
                 WHERE mp.annee BETWEEN :start_year AND :end_year
+                {zone_clause}
                 GROUP BY mp.annee
                 ORDER BY mp.annee
             """)
-            params = {"start_year": start_year, "end_year": end_year}
+            params = {"start_year": start_year, "end_year": end_year, **zone_params}
         
         result = await self.db.execute(query, params)
         rows = result.fetchall()
@@ -118,36 +142,38 @@ class DashboardNewService:
         region: str,
         start_year: int,
         end_year: int,
-        mode: str
+        mode: str,
+        zones: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Récupère la série détaillée depuis master_panel"""
         
         years = list(range(start_year, end_year + 1))
+        zone_clause, zone_params = self._zone_clause(zones)
         
-        query = text("""
+        query = text(f"""
             SELECT 
                 mp.annee,
                 SUM(mp.production) / 1000000 as production,
                 SUM(mp.distribution) / 1000000 as distribution,
-                SUM(mp.cons_pop_branchee) / 1000000 as consommation
+                SUM(COALESCE(mp.cons_pop_branchee, 0) + COALESCE(mp.cons_bf, 0) + COALESCE(mp.cons_administrative, 0) + COALESCE(mp.cons_industrielle, 0) + COALESCE(mp.cons_autres, 0)) / 1000000 as consommation
             FROM master_panel mp
-            WHERE mp.annee BETWEEN :start_year AND :end_year
+            WHERE mp.annee BETWEEN :start_year AND :end_year {zone_clause}
             GROUP BY mp.annee
             ORDER BY mp.annee
         """)
         
-        params = {"start_year": start_year, "end_year": end_year}
+        params = {"start_year": start_year, "end_year": end_year, **zone_params}
         
-        if region != "all":
-            query = text("""
+        if region is not None:
+            query = text(f"""
                 SELECT 
                     mp.annee,
                     SUM(mp.production) / 1000000 as production,
                     SUM(mp.distribution) / 1000000 as distribution,
-                    SUM(mp.cons_pop_branchee) / 1000000 as consommation
+                    SUM(COALESCE(mp.cons_pop_branchee, 0) + COALESCE(mp.cons_bf, 0) + COALESCE(mp.cons_administrative, 0) + COALESCE(mp.cons_industrielle, 0) + COALESCE(mp.cons_autres, 0)) / 1000000 as consommation
                 FROM master_panel mp
                 WHERE mp.code_region_12 = :region
-                AND mp.annee BETWEEN :start_year AND :end_year
+                AND mp.annee BETWEEN :start_year AND :end_year {zone_clause}
                 GROUP BY mp.annee
                 ORDER BY mp.annee
             """)
@@ -183,50 +209,65 @@ class DashboardNewService:
             "consommation": consommation
         }
     
-    async def _get_statistics(self, region: str, target_year: int) -> Dict[str, Any]:
+    async def _get_statistics(self, region: str, target_year: int, zones: Optional[List[str]] = None) -> Dict[str, Any]:
         """Récupère les statistiques globales depuis master_panel"""
         
-        params = {"year": target_year}
+        zone_clause, zone_params = self._zone_clause(zones)
+        params = {"year": target_year, **zone_params}
         
-        if region != "all":
-            query = text("""
+        if region is not None:
+            query = text(f"""
                 SELECT 
                     COUNT(DISTINCT mp.id_centre_desservi) as nb_centres,
                     SUM(mp.population_2024) as population_totale,
-                    SUM(mp.cons_pop_branchee) as consommation_totale
+                    SUM(
+                        COALESCE(mp.cons_pop_branchee, 0)
+                        + COALESCE(mp.cons_bf, 0)
+                        + COALESCE(mp.cons_administrative, 0)
+                        + COALESCE(mp.cons_industrielle, 0)
+                        + COALESCE(mp.cons_autres, 0)
+                    ) as consommation_totale
                 FROM master_panel mp
                 WHERE mp.code_region_12 = :region
                 AND mp.annee = :year
+                {zone_clause}
             """)
             params["region"] = region
         else:
-            query = text("""
+            query = text(f"""
                 SELECT 
                     COUNT(DISTINCT mp.id_centre_desservi) as nb_centres,
                     SUM(mp.population_2024) as population_totale,
-                    SUM(mp.cons_pop_branchee) as consommation_totale
+                    SUM(
+                        COALESCE(mp.cons_pop_branchee, 0)
+                        + COALESCE(mp.cons_bf, 0)
+                        + COALESCE(mp.cons_administrative, 0)
+                        + COALESCE(mp.cons_industrielle, 0)
+                        + COALESCE(mp.cons_autres, 0)
+                    ) as consommation_totale
                 FROM master_panel mp
                 WHERE mp.annee = :year
+                {zone_clause}
             """)
         
         result = await self.db.execute(query, params)
         row = result.first()
         
         # Centres en déficit
-        deficit_params = {"year": target_year}
-        deficit_query = text("""
+        deficit_params = {"year": target_year, **zone_params}
+        deficit_query = text(f"""
             SELECT COUNT(DISTINCT id_centre_desservi) as deficit_count
-            FROM master_panel
-            WHERE annee = :year
+            FROM master_panel mp
+            WHERE mp.annee = :year {zone_clause}
             AND production < cons_pop_branchee
         """)
         
-        if region != "all":
-            deficit_query = text("""
+        if region is not None:
+            deficit_query = text(f"""
                 SELECT COUNT(DISTINCT id_centre_desservi) as deficit_count
-                FROM master_panel
-                WHERE code_region_12 = :region
-                AND annee = :year
+                FROM master_panel mp
+                WHERE mp.code_region_12 = :region
+                AND mp.annee = :year {zone_clause}
                 AND production < cons_pop_branchee
             """)
             deficit_params["region"] = region
@@ -245,34 +286,33 @@ class DashboardNewService:
             "deficitTrend": "-3"
         }
     
-    async def _get_bilan_by_zone(self, region: str, year: int) -> Dict[str, List]:
+    async def _get_bilan_by_zone(self, region: str, year: int, zones: Optional[List[str]] = None) -> Dict[str, List]:
         """Récupère le bilan (solde) par zone depuis master_panel"""
-        
-        params = {"year": year}
-        
-        if region != "all":
-            query = text("""
-                SELECT 
-                    mp.lib_centre_uniformise as zone,
-                    SUM(mp.production) - SUM(mp.cons_pop_branchee) as solde
-                FROM master_panel mp
-                WHERE mp.code_region_12 = :region
-                GROUP BY mp.lib_centre_uniformise
-                ORDER BY solde DESC
-                LIMIT 30
-            """)
+        zone_clause, zone_params = self._zone_clause(zones)
+        params = {"year": year, **zone_params}
+        region_clause = ""
+        if region is not None:
+            region_clause = "AND mp.code_region_12 = :region"
             params["region"] = region
-        else:
-            query = text("""
-                SELECT 
-                    mp.lib_centre_uniformise as zone,
-                    SUM(mp.production) - SUM(mp.cons_pop_branchee) as solde
-                FROM master_panel mp
-                WHERE mp.annee = :year
-                GROUP BY mp.lib_centre_uniformise
-                ORDER BY solde DESC
-                LIMIT 30
-            """)
+
+        consommation = """
+            COALESCE(mp.cons_pop_branchee, 0) + COALESCE(mp.cons_bf, 0)
+            + COALESCE(mp.cons_administrative, 0) + COALESCE(mp.cons_industrielle, 0)
+            + COALESCE(mp.cons_autres, 0)
+        """
+        query = text(f"""
+            SELECT
+                mp.lib_centre_uniformise as zone,
+                SUM(mp.production) - SUM({consommation}) as solde
+            FROM master_panel mp
+            WHERE mp.annee = :year
+            {region_clause}
+            {zone_clause}
+            AND mp.production IS NOT NULL
+            GROUP BY mp.lib_centre_uniformise
+            ORDER BY solde DESC
+            LIMIT 30
+        """)
         
         result = await self.db.execute(query, params)
         
@@ -284,30 +324,37 @@ class DashboardNewService:
         
         return {"labels": zones, "values": soldes}
     
-    async def _get_bilan_by_province(self, region: str, year: int) -> Dict[str, List]:
+    async def _get_bilan_by_province(self, region: str, year: int, zones: Optional[List[str]] = None) -> Dict[str, List]:
         """Récupère le bilan par province depuis master_panel"""
+        zone_clause, zone_params = self._zone_clause(zones)
+        params = {"year": year, **zone_params}
         
-        params = {"year": year}
-        
-        if region != "all":
-            query = text("""
+        if region is not None:
+            query = text(f"""
                 SELECT 
                     mp.lib_province as province,
                     SUM(mp.production) - SUM(mp.cons_pop_branchee) as solde
                 FROM master_panel mp
                 WHERE mp.code_region_12 = :region
+                AND mp.annee = :year
+                {zone_clause}
+                AND mp.production IS NOT NULL
+                AND mp.cons_pop_branchee IS NOT NULL
                 GROUP BY mp.lib_province
                 ORDER BY solde DESC
                 LIMIT 20
             """)
             params["region"] = region
         else:
-            query = text("""
+            query = text(f"""
                 SELECT 
                     mp.lib_province as province,
                     SUM(mp.production) - SUM(mp.cons_pop_branchee) as solde
                 FROM master_panel mp
                 WHERE mp.annee = :year
+                {zone_clause}
+                AND mp.production IS NOT NULL
+                AND mp.cons_pop_branchee IS NOT NULL
                 GROUP BY mp.lib_province
                 ORDER BY solde DESC
                 LIMIT 20
@@ -331,6 +378,9 @@ class DashboardNewService:
                 mp.libelle_region as region,
                 SUM(mp.production) - SUM(mp.cons_pop_branchee) as solde
             FROM master_panel mp
+            WHERE mp.annee = :year
+            AND mp.production IS NOT NULL
+            AND mp.cons_pop_branchee IS NOT NULL
             GROUP BY mp.libelle_region
             ORDER BY solde DESC
         """)
@@ -345,35 +395,49 @@ class DashboardNewService:
         
         return {"labels": regions, "values": soldes}
     
-    async def _get_rendements(self, region: str) -> Dict[str, Any]:
+    async def _get_rendements(
+        self,
+        region: Optional[int],
+        year: int = 2024,
+        zones: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Récupère les rendements depuis master_panel"""
         
-        params = {}
+        zone_clause, zone_params = self._zone_clause(zones)
+        params = {"year": year, **zone_params}
         
-        if region != "all":
-            query = text("""
+        if region is not None:
+            query = text(f"""
                 SELECT 
                     mp.lib_centre_uniformise as zone,
-                    AVG(mp.taux_branchement) as taux_branchement,
-                    AVG(mp.rend_distribution) as rend_distribution,
-                    AVG(mp.rend_adduction) as rend_adduction
+                    AVG(CASE WHEN mp.taux_branchement <= 1 THEN mp.taux_branchement * 100 ELSE mp.taux_branchement END) as taux_branchement,
+                    AVG(CASE WHEN mp.rend_distribution <= 1 THEN mp.rend_distribution * 100 ELSE mp.rend_distribution END) as rend_distribution,
+                    AVG(CASE WHEN mp.rend_adduction <= 1 THEN mp.rend_adduction * 100 ELSE mp.rend_adduction END) as rend_adduction
                 FROM master_panel mp
                 WHERE mp.code_region_12 = :region
-                AND mp.annee = 2024
+                AND mp.annee = :year
+                {zone_clause}
+                AND mp.rend_distribution IS NOT NULL
+                AND mp.rend_adduction IS NOT NULL
+                AND mp.taux_branchement IS NOT NULL
                 GROUP BY mp.lib_centre_uniformise
                 ORDER BY rend_distribution DESC, rend_adduction DESC, taux_branchement DESC
                 LIMIT 15
             """)
             params["region"] = region
         else:
-            query = text("""
+            query = text(f"""
                 SELECT 
                     mp.lib_centre_uniformise as zone,
-                    AVG(mp.taux_branchement) as taux_branchement,
-                    AVG(mp.rend_distribution) as rend_distribution,
-                    AVG(mp.rend_adduction) as rend_adduction
+                    AVG(CASE WHEN mp.taux_branchement <= 1 THEN mp.taux_branchement * 100 ELSE mp.taux_branchement END) as taux_branchement,
+                    AVG(CASE WHEN mp.rend_distribution <= 1 THEN mp.rend_distribution * 100 ELSE mp.rend_distribution END) as rend_distribution,
+                    AVG(CASE WHEN mp.rend_adduction <= 1 THEN mp.rend_adduction * 100 ELSE mp.rend_adduction END) as rend_adduction
                 FROM master_panel mp
-                WHERE mp.annee = 2024
+                WHERE mp.annee = :year
+                {zone_clause}
+                AND mp.rend_distribution IS NOT NULL
+                AND mp.rend_adduction IS NOT NULL
+                AND mp.taux_branchement IS NOT NULL
                 GROUP BY mp.lib_centre_uniformise
                 ORDER BY rend_distribution DESC, rend_adduction DESC, taux_branchement DESC
                 LIMIT 15
@@ -408,13 +472,13 @@ class DashboardNewService:
             ]
         }
     
-    async def _get_alerts(self, region: str) -> List[Dict[str, Any]]:
+    async def _get_alerts(self, region: Optional[int], year: int = 2024) -> List[Dict[str, Any]]:
         """Récupère les alertes actives depuis master_panel"""
         
         alerts = []
         
         # Alerte centres en déficit
-        deficit_params = {"year": 2024}
+        deficit_params = {"year": year}
         deficit_query = text("""
             SELECT COUNT(DISTINCT id_centre_desservi) as deficit_count
             FROM master_panel
@@ -422,7 +486,7 @@ class DashboardNewService:
             AND production < cons_pop_branchee
         """)
         
-        if region != "all":
+        if region is not None:
             deficit_query = text("""
                 SELECT COUNT(DISTINCT id_centre_desservi) as deficit_count
                 FROM master_panel
@@ -446,21 +510,21 @@ class DashboardNewService:
             })
         
         # Alerte rendement faible
-        rend_params = {"year": 2024}
+        rend_params = {"year": year}
         rend_query = text("""
             SELECT COUNT(DISTINCT id_centre_desservi) as low_rend_count
             FROM master_panel
             WHERE annee = :year
-            AND rend_distribution < 70
+            AND (CASE WHEN rend_distribution <= 1 THEN rend_distribution * 100 ELSE rend_distribution END) < 70
         """)
         
-        if region != "all":
+        if region is not None:
             rend_query = text("""
                 SELECT COUNT(DISTINCT id_centre_desservi) as low_rend_count
                 FROM master_panel
                 WHERE code_region_12 = :region
                 AND annee = :year
-                AND rend_distribution < 70
+                AND (CASE WHEN rend_distribution <= 1 THEN rend_distribution * 100 ELSE rend_distribution END) < 70
             """)
             rend_params["region"] = region
         
@@ -487,9 +551,10 @@ class DashboardNewService:
         
         return alerts
     
-    async def _get_vulnerability(self, region: Optional[int]) -> Dict[str, Any]:
-        """Récupère les indicateurs de vulnérabilité réseau depuis master_panel"""
-        params = {"year": 2024}
+    async def _get_vulnerability(self, region: Optional[int], year: int = 2024, zones: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Récupère des indicateurs comparables et normalisés depuis PostgreSQL."""
+        zone_clause, zone_params = self._zone_clause(zones)
+        params = {"year": year, **zone_params}
         region_clause = ""
         if region is not None:
             region_clause = "AND mp.code_region_12 = :region"
@@ -498,18 +563,25 @@ class DashboardNewService:
         query = text(f"""
             SELECT
                 COUNT(DISTINCT mp.id_centre_desservi) as total_centres,
-                SUM(CASE WHEN mp.production < mp.cons_pop_branchee THEN 1 ELSE 0 END) as deficit_centres,
-                SUM(CASE WHEN mp.rend_distribution < 70 THEN 1 ELSE 0 END) as low_rend_centres,
-                SUM(CASE WHEN mp.rend_distribution >= 70 AND mp.rend_distribution < 85 THEN 1 ELSE 0 END) as tension_centres,
-                SUM(CASE WHEN mp.taux_branchement < 85 THEN 1 ELSE 0 END) as low_branching_centres,
-                AVG(mp.rend_distribution) as avg_rend_distribution,
-                AVG(mp.taux_branchement) as avg_taux_branchement,
+                COUNT(*) FILTER (WHERE mp.production IS NOT NULL AND mp.cons_pop_branchee IS NOT NULL) as centres_avec_bilan,
+                COUNT(*) FILTER (WHERE mp.rend_distribution IS NOT NULL) as centres_avec_rendement,
+                COUNT(*) FILTER (WHERE mp.production < mp.cons_pop_branchee) as deficit_centres,
+                COUNT(*) FILTER (WHERE mp.rend_distribution IS NOT NULL AND
+                    (CASE WHEN mp.rend_distribution <= 1 THEN mp.rend_distribution * 100 ELSE mp.rend_distribution END) < 70) as low_rend_centres,
+                COUNT(*) FILTER (WHERE mp.rend_distribution IS NOT NULL AND
+                    (CASE WHEN mp.rend_distribution <= 1 THEN mp.rend_distribution * 100 ELSE mp.rend_distribution END) >= 70 AND
+                    (CASE WHEN mp.rend_distribution <= 1 THEN mp.rend_distribution * 100 ELSE mp.rend_distribution END) < 85) as tension_centres,
+                COUNT(*) FILTER (WHERE mp.taux_branchement IS NOT NULL AND
+                    (CASE WHEN mp.taux_branchement <= 1 THEN mp.taux_branchement * 100 ELSE mp.taux_branchement END) < 85) as low_branching_centres,
+                AVG(CASE WHEN mp.rend_distribution <= 1 THEN mp.rend_distribution * 100 ELSE mp.rend_distribution END) as avg_rend_distribution,
+                AVG(CASE WHEN mp.taux_branchement <= 1 THEN mp.taux_branchement * 100 ELSE mp.taux_branchement END) as avg_taux_branchement,
                 AVG(mp.capacite_exploitable_centre) as avg_capacite_exploitable,
                 AVG(mp.capacite_equipee_centre) as avg_capacite_equipee,
                 SUM(mp.population_2024) as population_totale
             FROM master_panel mp
             WHERE mp.annee = :year
             {region_clause}
+            {zone_clause}
         """)
         result = await self.db.execute(query, params)
         summary = result.first() or None
@@ -518,12 +590,17 @@ class DashboardNewService:
             SELECT 
                 mp.lib_centre_uniformise as zone,
                 SUM(mp.production) - SUM(mp.cons_pop_branchee) as solde,
-                AVG(mp.rend_distribution) as rend_distribution,
-                AVG(mp.taux_branchement) as taux_branchement,
+                AVG(CASE WHEN mp.rend_distribution <= 1 THEN mp.rend_distribution * 100 ELSE mp.rend_distribution END) as rend_distribution,
+                AVG(CASE WHEN mp.taux_branchement <= 1 THEN mp.taux_branchement * 100 ELSE mp.taux_branchement END) as taux_branchement,
                 SUM(mp.population_2024) as population
             FROM master_panel mp
             WHERE mp.annee = :year
             {region_clause}
+            {zone_clause}
+              AND mp.production IS NOT NULL
+              AND mp.cons_pop_branchee IS NOT NULL
+              AND mp.rend_distribution IS NOT NULL
+              AND mp.taux_branchement IS NOT NULL
             GROUP BY mp.lib_centre_uniformise
             ORDER BY solde ASC
             LIMIT 8
@@ -533,6 +610,7 @@ class DashboardNewService:
         return {
             "summary": {
                 "totalCentres": int(summary.total_centres or 0),
+                "centresAvecBilan": int(summary.centres_avec_bilan or 0),
                 "deficitCentres": int(summary.deficit_centres or 0),
                 "lowRendCentres": int(summary.low_rend_centres or 0),
                 "tensionCentres": int(summary.tension_centres or 0),
@@ -542,6 +620,12 @@ class DashboardNewService:
                 "avgCapaciteExploitable": round(float(summary.avg_capacite_exploitable or 0), 1),
                 "avgCapaciteEquipee": round(float(summary.avg_capacite_equipee or 0), 1),
                 "populationTotale": int(summary.population_totale or 0)
+            },
+            "dataQuality": {
+                "source": "PostgreSQL · master_panel",
+                "year": year,
+                "centresAvecBilan": int(summary.centres_avec_bilan or 0),
+                "centresAvecRendement": int(summary.centres_avec_rendement or 0),
             },
             "topRiskZones": [
                 {
@@ -555,9 +639,10 @@ class DashboardNewService:
             ]
         }
     
-    async def _get_centres(self, region: Optional[int]) -> Dict[str, Any]:
+    async def _get_centres(self, region: Optional[int], year: int = 2024, zones: Optional[List[str]] = None) -> Dict[str, Any]:
         """Récupère la liste des centres et installations réelles depuis master_panel."""
-        params = {"year": 2024}
+        zone_clause, zone_params = self._zone_clause(zones)
+        params = {"year": year, **zone_params}
         region_clause = ""
         if region is not None:
             region_clause = "AND mp.code_region_12 = :region"
@@ -576,12 +661,26 @@ class DashboardNewService:
                 mp.population_2024 as population,
                 mp.menages_2024 as menages,
                 mp.production as production,
-                mp.cons_pop_branchee as consommation,
-                mp.rend_distribution as rend_distribution,
+                CASE
+                    WHEN mp.cons_pop_branchee IS NULL
+                     AND mp.cons_bf IS NULL
+                     AND mp.cons_administrative IS NULL
+                     AND mp.cons_industrielle IS NULL
+                     AND mp.cons_autres IS NULL
+                    THEN NULL
+                    ELSE COALESCE(mp.cons_pop_branchee, 0)
+                       + COALESCE(mp.cons_bf, 0)
+                       + COALESCE(mp.cons_administrative, 0)
+                       + COALESCE(mp.cons_industrielle, 0)
+                       + COALESCE(mp.cons_autres, 0)
+                END as consommation,
+                CASE WHEN mp.rend_distribution <= 1 THEN mp.rend_distribution * 100 ELSE mp.rend_distribution END as rend_distribution,
+                CASE WHEN mp.taux_branchement <= 1 THEN mp.taux_branchement * 100 ELSE mp.taux_branchement END as taux_branchement,
                 mp.mappable as mappable
             FROM master_panel mp
             WHERE mp.annee = :year
             {region_clause}
+            {zone_clause}
             ORDER BY mp.libelle_region, mp.lib_province, mp.lib_centre_uniformise
         """)
 
@@ -590,14 +689,29 @@ class DashboardNewService:
 
         centres = []
         for row in rows:
-            production = float(row.production or 0)
-            consommation = float(row.consommation or 0)
-            rend_distribution = float(row.rend_distribution or 0)
+            production = float(row.production) if row.production is not None else None
+            consommation = float(row.consommation) if row.consommation is not None else None
+            rend_distribution = float(row.rend_distribution) if row.rend_distribution is not None else None
+            taux_branchement = float(row.taux_branchement) if row.taux_branchement is not None else None
 
-            if production < consommation:
+            missing_fields = []
+            if production is None:
+                missing_fields.append("production")
+            if consommation is None:
+                missing_fields.append("consommation")
+            if rend_distribution is None:
+                missing_fields.append("rendement de distribution")
+            if taux_branchement is None:
+                missing_fields.append("taux de branchement")
+
+            if production is None or consommation is None:
+                status = 'unknown'
+            elif production < consommation:
                 status = 'deficit'
-            elif rend_distribution < 70:
+            elif (rend_distribution is not None and rend_distribution < 70) or (taux_branchement is not None and taux_branchement < 85):
                 status = 'warn'
+            elif missing_fields:
+                status = 'unknown'
             else:
                 status = 'ok'
 
@@ -615,6 +729,9 @@ class DashboardNewService:
                 "production": production,
                 "consommation": consommation,
                 "rend_distribution": rend_distribution,
+                "taux_branchement": taux_branchement,
+                "missing_fields": missing_fields,
+                "data_year": year,
                 "status": status,
                 "mappable": bool(row.mappable) if row.mappable is not None else False
             })
@@ -644,6 +761,7 @@ class DashboardNewService:
                    AND mp.annee = :year
                 WHERE 1=1
                 {inst_region_clause}
+                {zone_clause}
                 ORDER BY ip.installation
             """)
 
@@ -719,6 +837,7 @@ class DashboardNewService:
             "total": len(centres),
             "total_installations": len(installations),
             "region": region,
+            "year": year,
             "blocking_issues": blocking_issues,
         }
 

@@ -1,5 +1,5 @@
 // frontend/src/pages/Dashboard.jsx
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   AlertCircle, AlertTriangle, Info, Filter, Calendar, 
   MapPin, Building2, Globe, RefreshCw, ChevronDown, 
@@ -13,6 +13,7 @@ import AnalyticsCharts from '../components/AnalyticsCharts';
 import RegionSelector from '../components/RegionSelector';
 import { useChart } from '../hooks/useChart';
 import { chartColors, chartOptions, years } from '../utils/chartConfig';
+import { previsionApi } from '../services/api';
 
 // Configuration API - Version V2
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
@@ -39,6 +40,7 @@ const Dashboard = () => {
   const [consommationTypesData, setConsommationTypesData] = useState(null);
   const [vulnerabilityData, setVulnerabilityData] = useState(null);
   const [masterCentresData, setMasterCentresData] = useState(null);
+  const [predictionData, setPredictionData] = useState(null);
   
   // NOUVEAU : États séparés pour les zones par région
   const [allZones, setAllZones] = useState([]);
@@ -61,6 +63,15 @@ const Dashboard = () => {
     bilanZones: [],
     mode: 'real'
   });
+
+  // La zone est un filtre global : chaque appel ajoute la mÃªme liste au backend.
+  const selectedZonesKey = filters.bilanZones.join('|');
+  const selectedZonesRef = useRef(filters.bilanZones);
+  selectedZonesRef.current = filters.bilanZones;
+  const addSelectedZones = (params) => {
+    selectedZonesRef.current.forEach((zone) => params.append('zones', zone));
+    return params;
+  };
 
   // Récupérer la liste des régions depuis l'API V2
   useEffect(() => {
@@ -127,6 +138,7 @@ const Dashboard = () => {
         start_year: filters.startYear.toString(),
         end_year: filters.endYear.toString()
       });
+      addSelectedZones(params);
       const response = await fetch(`${API_BASE}${API_V2_PREFIX}/master/timeseries?${params}`);
       if (!response.ok) throw new Error('Erreur chargement timeseries');
       const data = await response.json();
@@ -143,6 +155,7 @@ const Dashboard = () => {
         start_year: filters.startYear.toString(),
         end_year: filters.endYear.toString()
       });
+      addSelectedZones(params);
       const response = await fetch(`${API_BASE}${API_V2_PREFIX}/master/timeseries-detail?${params}`);
       if (!response.ok) throw new Error('Erreur chargement timeseries detail');
       const data = await response.json();
@@ -158,6 +171,7 @@ const Dashboard = () => {
         region: selectedRegion.code,
         year: filters.endYear.toString()
       });
+      addSelectedZones(params);
       const response = await fetch(`${API_BASE}${API_V2_PREFIX}/master/stats?${params}`);
       if (!response.ok) throw new Error('Erreur chargement stats');
       const data = await response.json();
@@ -173,6 +187,7 @@ const Dashboard = () => {
         region: selectedRegion.code,
         year: filters.endYear.toString()
       });
+      addSelectedZones(params);
       const response = await fetch(`${API_BASE}${API_V2_PREFIX}/master/bilan/zones?${params}`);
       if (!response.ok) throw new Error('Erreur chargement bilan zones');
       const data = await response.json();
@@ -188,6 +203,7 @@ const Dashboard = () => {
         region: selectedRegion.code,
         year: filters.endYear.toString()
       });
+      addSelectedZones(params);
       const response = await fetch(`${API_BASE}${API_V2_PREFIX}/master/bilan/provinces?${params}`);
       if (!response.ok) throw new Error('Erreur chargement bilan provinces');
       const data = await response.json();
@@ -199,7 +215,7 @@ const Dashboard = () => {
 
   const fetchVulnerability = useCallback(async () => {
     try {
-      const params = new URLSearchParams({ region: selectedRegion.code });
+      const params = addSelectedZones(new URLSearchParams({ region: selectedRegion.code, year: filters.endYear.toString() }));
       const response = await fetch(`${API_BASE}${API_V2_PREFIX}/master/vulnerability?${params}`);
       if (!response.ok) throw new Error('Erreur chargement vulnérabilité');
       const data = await response.json();
@@ -207,11 +223,11 @@ const Dashboard = () => {
     } catch (err) {
       console.error('❌ Erreur vulnérabilité:', err);
     }
-  }, [selectedRegion.code]);
+  }, [selectedRegion.code, filters.endYear]);
 
   const fetchMasterCentres = useCallback(async () => {
     try {
-      const params = new URLSearchParams({ region: selectedRegion.code });
+      const params = addSelectedZones(new URLSearchParams({ region: selectedRegion.code, year: filters.endYear.toString() }));
       const response = await fetch(`${API_BASE}${API_V2_PREFIX}/master/centres?${params}`);
       if (response.ok) {
         const data = await response.json();
@@ -312,8 +328,10 @@ const Dashboard = () => {
   const fetchRendements = useCallback(async () => {
     try {
       const params = new URLSearchParams({
-        region: selectedRegion.code
+        region: selectedRegion.code,
+        year: filters.endYear.toString()
       });
+      addSelectedZones(params);
       const response = await fetch(`${API_BASE}${API_V2_PREFIX}/master/rendements?${params}`);
       if (!response.ok) throw new Error('Erreur chargement rendements');
       const data = await response.json();
@@ -321,13 +339,15 @@ const Dashboard = () => {
     } catch (err) {
       console.error("❌ Erreur rendements:", err);
     }
-  }, [selectedRegion.code]);
+  }, [selectedRegion.code, filters.endYear]);
 
   const fetchAlerts = useCallback(async () => {
     try {
       const params = new URLSearchParams({
-        region: selectedRegion.code
+        region: selectedRegion.code,
+        year: filters.endYear.toString()
       });
+      addSelectedZones(params);
       const response = await fetch(`${API_BASE}${API_V2_PREFIX}/master/alerts?${params}`);
       if (!response.ok) throw new Error('Erreur chargement alertes');
       const data = await response.json();
@@ -335,7 +355,7 @@ const Dashboard = () => {
     } catch (err) {
       console.error("❌ Erreur alertes:", err);
     }
-  }, [selectedRegion.code]);
+  }, [selectedRegion.code, filters.endYear]);
 
   const fetchConsommationTypes = useCallback(async () => {
     try {
@@ -344,6 +364,7 @@ const Dashboard = () => {
         start_year: filters.startYear.toString(),
         end_year: filters.endYear.toString()
       });
+      addSelectedZones(params);
       const response = await fetch(`${API_BASE}${API_V2_PREFIX}/consommation/types?${params}`);
       if (!response.ok) throw new Error('Erreur chargement consommation types');
       const data = await response.json();
@@ -352,6 +373,28 @@ const Dashboard = () => {
       console.error("❌ Erreur consommation types:", err);
     }
   }, [selectedRegion.code, filters.startYear, filters.endYear]);
+
+  const fetchModelPredictions = useCallback(async () => {
+    try {
+      const targets = ['consommation_totale', 'production', 'distribution'];
+      const modelRegion = selectedRegion.code === 'all' ? null : selectedRegion.name;
+      const modelScope = { region: modelRegion, zones: selectedZonesRef.current };
+      const responses = await Promise.all(targets.map((target) => previsionApi.previsionsAnnuelles(null, target, modelScope)));
+      const aggregate = (rows) => (Array.isArray(rows) ? rows : []).reduce((acc, row) => {
+        const year = String(row.annee);
+        acc[year] = (acc[year] || 0) + (Number(row.q50) || 0) / 1_000_000;
+        return acc;
+      }, {});
+      setPredictionData({
+        consommation: aggregate(responses[0]),
+        production: aggregate(responses[1]),
+        distribution: aggregate(responses[2]),
+      });
+    } catch (err) {
+      console.error('Erreur chargement prévisions modèle:', err);
+      setPredictionData(null);
+    }
+  }, [selectedRegion.code, selectedRegion.name, selectedZonesKey]);
 
   // 🔄 Charger toutes les données
   const fetchAllData = useCallback(async () => {
@@ -374,7 +417,8 @@ const Dashboard = () => {
         fetchAlerts(),
         fetchVulnerability(),
         fetchMasterCentres(),
-        fetchConsommationTypes()
+        fetchConsommationTypes(),
+        fetchModelPredictions()
       ]);
     } catch (err) {
       console.error("❌ Erreur chargement données:", err);
@@ -391,6 +435,11 @@ const Dashboard = () => {
   useEffect(() => {
     fetchAllData();
   }, [fetchAllData]);
+
+  // DÃ©clenche un recalcul complet lorsque la sÃ©lection de zones change.
+  useEffect(() => {
+    fetchAllData();
+  }, [selectedZonesKey]);
 
   // Handler pour changer de région
   const handleRegionChange = (region) => {
@@ -425,6 +474,36 @@ const Dashboard = () => {
     };
   }, [timeseriesDetailData]);
 
+  const mainChartSeries = useMemo(() => {
+    const predictionYears = Object.keys(predictionData?.consommation || {});
+    const labels = [...new Set([...ts.labels, ...predictionYears])].sort((a, b) => Number(a) - Number(b));
+    const coverage = (vulnerabilityData?.dataQuality?.centresAvecBilan || 0) /
+      Math.max(1, vulnerabilityData?.summary?.totalCentres || 1);
+    const latestYear = String(ts.real_end_year || filters.endYear);
+    const lastReliableActualYear = coverage < 0.8
+      ? String(Number(latestYear) - 1)
+      : latestYear;
+    const historical = (values) => labels.map((year) => {
+      if (Number(year) > Number(lastReliableActualYear)) return null;
+      return values[ts.labels.indexOf(year)] ?? null;
+    });
+    const predicted = (values, historicalValues) => labels.map((year) => {
+      if (year === lastReliableActualYear) return historicalValues[labels.indexOf(year)] ?? null;
+      return Number(year) > Number(lastReliableActualYear) ? values?.[year] ?? null : null;
+    });
+    const consommation = historical(ts.conso);
+    const production = historical(ts.prod);
+    const distribution = historical(ts.distribution);
+    return {
+      labels,
+      consommation, production, distribution,
+      consommationPrediction: predicted(predictionData?.consommation, consommation),
+      productionPrediction: predicted(predictionData?.production, production),
+      distributionPrediction: predicted(predictionData?.distribution, distribution),
+      lastReliableActualYear,
+    };
+  }, [ts, predictionData, vulnerabilityData, filters.endYear]);
+
   const bilan = bilanZonesData || { labels: [], values: [] };
   const bilanProvinces = bilanProvincesData || { labels: [], values: [] };
   const bilanRegions = bilanRegionsData || { labels: [], values: [] };
@@ -458,25 +537,41 @@ const Dashboard = () => {
   const mainChartConfig = useMemo(() => ({
     type: 'line',
     data: {
-      labels: ts.labels,
+      labels: mainChartSeries.labels,
       datasets: [
         {
-          label: 'Consommation',
-          data: ts.conso || [],
+          label: 'Consommation totale',
+          data: mainChartSeries.consommation,
           borderColor: chartColors.blue,
           backgroundColor: '#2d8bff15',
-          fill: true,
+          fill: false,
           tension: 0.4,
           pointRadius: 4
         },
         {
           label: 'Production (réelle)',
-          data: ts.prod || [],
+          data: mainChartSeries.production,
           borderColor: chartColors.teal,
           backgroundColor: '#00c9a715',
-          fill: true,
+          fill: false,
           tension: 0.4,
           pointRadius: 4
+        },
+        {
+          label: 'Distribution', data: mainChartSeries.distribution,
+          borderColor: chartColors.amber, backgroundColor: chartColors.amber + '15', fill: false, tension: 0.4, pointRadius: 4
+        },
+        {
+          label: 'Prévision consommation (modèle)', data: mainChartSeries.consommationPrediction,
+          borderColor: chartColors.blue, borderDash: [7, 5], borderWidth: 2, pointRadius: 3, fill: false
+        },
+        {
+          label: 'Prévision production (modèle)', data: mainChartSeries.productionPrediction,
+          borderColor: chartColors.teal, borderDash: [7, 5], borderWidth: 2, pointRadius: 3, fill: false
+        },
+        {
+          label: 'Prévision distribution (modèle)', data: mainChartSeries.distributionPrediction,
+          borderColor: chartColors.amber, borderDash: [7, 5], borderWidth: 2, pointRadius: 3, fill: false
         }
       ]
     },
@@ -491,7 +586,7 @@ const Dashboard = () => {
         }
       }
     }
-  }), [ts.labels, ts.conso, ts.prod]);
+  }), [mainChartSeries]);
 
   useChart('mainChart', mainChartConfig);
 
@@ -501,7 +596,7 @@ const Dashboard = () => {
     data: {
       labels: filteredBilan.labels || [],
       datasets: [{
-        label: 'Solde (m³/an)',
+        label: 'Solde net : production − consommation',
         data: filteredBilan.values || [],
         backgroundColor: (filteredBilan.values || []).map(v => 
           (v < 0 ? chartColors.red : chartColors.teal) + 'aa'
@@ -533,7 +628,7 @@ const Dashboard = () => {
         },
         y: {
           ticks: {
-            callback: (v) => (v / 1e6).toFixed(1) + 'M',
+            callback: (v) => (v / 1e6).toFixed(1) + ' Mm³',
             font: { size: 9 }
           }
         }
@@ -731,7 +826,7 @@ const Dashboard = () => {
       <div className="page-header">
         <div className="page-title">Tableau de bord — Réseau ONEE</div>
         <div className="page-sub">
-          Données historiques réelles {filters.startYear}–{filters.endYear} · {selectedRegion.name}
+          Donnees historiques réelles {filters.startYear}–{filters.endYear} · {selectedRegion.name}
         </div>
         <button
           onClick={handleRefresh}
@@ -809,7 +904,7 @@ const Dashboard = () => {
               onZoneToggle={handleBilanZoneToggle}
               onSelectAll={handleSelectAllBilanZones}
               onClearAll={handleClearBilanZones}
-              label={`Filtrer le bilan par zone (${selectedRegion.name})`}
+              label={`Filtrer tout le tableau de bord par zone (${selectedRegion.name})`}
               maxDisplay={15}
               showCount={true}
               region={selectedRegion.code}
@@ -817,7 +912,7 @@ const Dashboard = () => {
           )}
         </div>
         <div style={{
-          padding: '10px 16px',
+          display: 'none',
           fontSize: '0.75rem',
           color: 'var(--text2)',
           borderTop: '1px solid var(--border)',
@@ -827,10 +922,20 @@ const Dashboard = () => {
           alignItems: 'center',
           gap: '8px'
         }}>
-          <Info size={14} style={{ color: 'var(--text2)' }} />
-          <span>Le filtre zone affecte <strong>uniquement</strong> l'onglet "Bilan par zone". Les autres vues affichent toutes les données.</span>
+        
         </div>
       </div>
+
+      {vulnerabilityData?.dataQuality && (
+        <div className="card" style={{ marginBottom: '16px', padding: '12px 16px', borderColor: 'var(--amber)' }}>
+          <div style={{ fontSize: '0.82rem', color: 'var(--text2)' }}>
+            Donn&eacute;es historiques r&eacute;elles pour {vulnerabilityData.dataQuality.year}:{' '}
+            <strong>{vulnerabilityData.dataQuality.centresAvecBilan}</strong> centre(s) avec bilan disponible
+            sur <strong>{vulnerabilityData.summary?.totalCentres || 0}</strong> centre(s) affich&eacute;s.
+            Les valeurs manquantes ne sont ni estim&eacute;es ni remplac&eacute;es.
+          </div>
+        </div>
+      )}
 
       {/* Chart principal */}
       <div className="charts-row">
@@ -838,20 +943,28 @@ const Dashboard = () => {
           <div className="card-header">
             <div>
               <div className="card-title">
-                Consommation vs Production (données réelles)
+                Consommation, Production et Distribution
               </div>
               <div className="card-sub">
-                En millions m³/an · {filters.startYear}–{filters.endYear} · {selectedRegion.name}
+                En millions m³/an · historique observé jusqu&apos;à {mainChartSeries.lastReliableActualYear} · prévisions du modèle 2024–2026 · {selectedRegion.name}{filters.bilanZones.length > 0 ? ` · ${filters.bilanZones.join(', ')}` : ''}
               </div>
             </div>
             <div className="legend">
               <div className="legend-item">
                 <div className="legend-dot" style={{ background: chartColors.blue }}></div>
-                Consommation
+                Consommation — historique
               </div>
               <div className="legend-item">
                 <div className="legend-dot" style={{ background: chartColors.teal }}></div>
-                Production
+                Production — historique
+              </div>
+              <div className="legend-item">
+                <div className="legend-dot" style={{ background: chartColors.amber }}></div>
+                Distribution — historique
+              </div>
+              <div className="legend-item">
+                <div style={{ width: 18, borderTop: `2px dashed ${chartColors.blue}` }}></div>
+                Prévisions du modèle — traits pointillés
               </div>
             </div>
           </div>
@@ -885,7 +998,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      <AnalyticsCharts region={selectedRegion.code} year={parseInt(filters.endYear)} />
+      <AnalyticsCharts region={selectedRegion.code} year={parseInt(filters.endYear)} zones={filters.bilanZones} />
 
       {/* Onglets Bilan */}
       <div className="card" style={{ marginBottom: '16px' }}>
@@ -893,8 +1006,7 @@ const Dashboard = () => {
           <div style={{ display: 'flex', gap: '4px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
             {[
               { id: 'zones', label: 'Zones', icon: MapPin, count: totalCount },
-              { id: 'provinces', label: 'Provinces', icon: Building2, count: bilanProvinces.labels?.length || 0 },
-              { id: 'regions', label: 'Régions', icon: Globe, count: bilanRegions.labels?.length || 0 }
+              { id: 'provinces', label: 'Provinces', icon: Building2, count: bilanProvinces.labels?.length || 0 }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -921,20 +1033,24 @@ const Dashboard = () => {
         </div>
         <div style={{ padding: '0 16px 16px' }}>
           <div className="card-title" style={{ fontSize: '1rem', marginBottom: '4px' }}>
-            Bilan {bilanTitle}
+            Solde net {bilanTitle}
           </div>
           <div className="card-sub" style={{ marginBottom: '12px', fontSize: '0.85rem' }}>
-            Solde production − consommation{' '}
+            Production − consommation : vert = excédent, rouge = déficit{' '}
             {activeBilanTab === 'zones' && selectedCount > 0
               ? `· ${selectedCount}/${totalCount} zones sélectionnées`
               : `· Toutes les zones de ${selectedRegion.name}`}
+          </div>
+          <div className="legend" style={{ padding: '0 16px 10px' }}>
+            <div className="legend-item"><div className="legend-dot" style={{ background: chartColors.teal }}></div>Excédent de production</div>
+            <div className="legend-item"><div className="legend-dot" style={{ background: chartColors.red }}></div>Déficit de production</div>
           </div>
           <canvas id="bilanChart" height="300" style={{ width: '100%', display: 'block' }}></canvas>
         </div>
       </div>
 
       {/* Flux chart */}
-      <div className="charts-row">
+      <div className="charts-row" style={{ display: 'none' }}>
         <div className="card chart-wide">
           <div className="card-header">
             <div>

@@ -11,101 +11,9 @@ const apiClient = axios.create({
 });
 
 // ============================================================
-// API BASE (Port 8000) - Pour l'exploration des tables Access
-// ============================================================
-const API_BASE_URL = 'http://localhost:8000/api';
-
-// ============================================================
 // API ML (Port 8001) - Pour les prédictions du modèle
 // ============================================================
 const ML_API_BASE_URL = 'http://localhost:8001/api';
-
-// ============================================================
-// API BASE - Fonctions pour l'exploration des tables
-// ============================================================
-export const api = {
-  async getTables() {
-    try {
-      const response = await fetch(`${API_BASE_URL}/access/tables`);
-      if (!response.ok) throw new Error('Erreur lors de la récupération des tables');
-      return response.json();
-    } catch (error) {
-      console.error('API Error:', error);
-      return { tables: [] };
-    }
-  },
-
-  async getTableSchemas() {
-    try {
-      const response = await fetch(`${API_BASE_URL}/access/schemas`);
-      if (!response.ok) {
-        // Fallback: essayer sans /access/
-        const response2 = await fetch(`${API_BASE_URL}/schemas`);
-        if (response2.ok) return response2.json();
-        throw new Error('Erreur lors de la récupération des schémas');
-      }
-      return response.json();
-    } catch (error) {
-      console.error('API Error:', error);
-      return {};
-    }
-  },
-
-  async getTableData(tableName, limit = 500) {
-    try {
-      // Encoder le nom de la table pour gérer les underscores et caractères spéciaux
-      const encodedTableName = encodeURIComponent(tableName);
-      const response = await fetch(`${API_BASE_URL}/access/tables/${encodedTableName}?limit=${limit}`);
-      if (!response.ok) {
-        // Si 404, essayer avec l'URL non encodée
-        const response2 = await fetch(`${API_BASE_URL}/access/tables/${tableName}?limit=${limit}`);
-        if (response2.ok) return response2.json();
-        throw new Error(`Erreur lors de la récupération de la table ${tableName}`);
-      }
-      return response.json();
-    } catch (error) {
-      console.error('API Error:', error);
-      return { error: error.message, data: [], columns: [] };
-    }
-  },
-
-  async getTableSummary(tableName) {
-    try {
-      const encodedTableName = encodeURIComponent(tableName);
-      const response = await fetch(`${API_BASE_URL}/access/tables/${encodedTableName}/summary`);
-      if (!response.ok) throw new Error(`Erreur lors de la récupération du résumé`);
-      return response.json();
-    } catch (error) {
-      console.error('API Error:', error);
-      return { error: error.message };
-    }
-  },
-
-  async executeQuery(query) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query })
-      });
-      if (!response.ok) throw new Error('Erreur lors de l\'exécution de la requête');
-      return response.json();
-    } catch (error) {
-      console.error('API Error:', error);
-      return { error: error.message };
-    }
-  },
-
-  async testConnection() {
-    try {
-      const response = await fetch(`${API_BASE_URL}/test`);
-      return response.json();
-    } catch (error) {
-      console.error('API Error:', error);
-      return { connected: false, error: error.message };
-    }
-  }
-};
 
 // ============================================================
 // API ML - Fonctions pour les prédictions
@@ -435,6 +343,12 @@ export const previsionApi = {
   centres() { return this._get('/prediction/centres'); },
   
   drs() { return this._get('/prediction/drs'); },
+
+  installations() { return this._get('/prediction/installations'); },
+
+  parametresCentre(centreId) {
+    return this._get(`/scenario/parametres-centre/${encodeURIComponent(centreId)}`);
+  },
   
   historique(centreId, cible, region) {
     const q = new URLSearchParams({ cible: cible || 'consommation_totale' });
@@ -443,10 +357,12 @@ export const previsionApi = {
     return this._get(`/prediction/historique?${q}`);
   },
   
-  previsionsAnnuelles(centreId, cible) {
+  previsionsAnnuelles(centreId, cible, { region = null, zones = [] } = {}) {
     const q = new URLSearchParams();
     if (centreId) q.set('centre_id', centreId);
     if (cible)    q.set('cible', cible);
+    if (region) q.set('region', region);
+    (zones || []).forEach((zone) => q.append('zones', zone));
     return this._get(`/prediction/previsions-annuelles?${q}`);
   },
   
@@ -509,4 +425,4 @@ export const centresAPI = {
   }
 };
 
-export default api;
+export default apiClient;

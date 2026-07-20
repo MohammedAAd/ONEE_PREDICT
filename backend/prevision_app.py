@@ -2,7 +2,7 @@
 backend/prevision_app.py
 =========================
 Mini-API AUTONOME : previsions + moteur de scenarios uniquement.
-N'a besoin NI de PostgreSQL NI de Microsoft Access — seulement des artefacts JSON.
+N'a besoin d'aucune base de données — seulement des artefacts JSON.
 
 Idéal pour que l'equipe React developpe tout de suite, sans configurer la base.
 

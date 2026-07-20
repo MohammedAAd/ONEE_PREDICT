@@ -14,7 +14,8 @@ class ConsumptionNewService:
         centre_id: Optional[str] = None,
         region: str = "all",
         start_year: int = 2020,
-        end_year: int = 2030
+        end_year: int = 2030,
+        zones: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Récupère la consommation par type (Administrative, Industrielle, Autres, Bornes Fontaines)
@@ -49,26 +50,47 @@ class ConsumptionNewService:
             """)
             params["centre_id"] = centre_id
         
-        if region != "all" and not centre_id:
-            query = text("""
+        if (region is not None and region != "all" or zones) and not centre_id:
+            zone_clause = " AND mp.lib_centre_uniformise = ANY(:zones)" if zones else ""
+            query = text(f"""
                 SELECT 
                     fl.annee,
                     fl.type_consommation,
                     SUM(fl.consommation) as consommation
                 FROM fact_long fl
                 JOIN master_panel mp ON fl.id_centre_desservi = mp.id_centre_desservi
-                WHERE mp.code_region_12 = :region
+                    AND fl.annee = mp.annee
+                WHERE 1=1
+                {"AND mp.code_region_12 = :region" if region is not None and region != "all" else ""}
+                {zone_clause}
                 AND fl.annee BETWEEN :start_year AND :end_year
                 GROUP BY fl.annee, fl.type_consommation
                 ORDER BY fl.annee, fl.type_consommation
             """)
-            params["region"] = region
+            if region is not None and region != "all":
+                params["region"] = region
+            if zones:
+                params["zones"] = [str(zone).strip() for zone in zones if str(zone).strip()]
         
         result = await self.db.execute(query, params)
         rows = result.fetchall()
         
-        # Types de consommation possibles
-        types = ["Administrative", "Industrielle", "Autres", "Bornes Fontaines"]
+        # Afficher toutes les catégories réellement présentes dans fact_long.
+        # L'ancienne liste fixe excluait notamment « Population branchée ».
+        preferred_order = [
+            "Population branchée",
+            "Bornes Fontaines",
+            "Administrative",
+            "Industrielle",
+            "Autres",
+        ]
+        available_types = {
+            str(row.type_consommation).strip()
+            for row in rows
+            if row.type_consommation is not None and str(row.type_consommation).strip()
+        }
+        types = [item for item in preferred_order if item in available_types]
+        types.extend(sorted(available_types - set(types)))
         
         # Initialiser les données par type
         data_by_type = {t: {y: 0 for y in years} for t in types}
@@ -79,18 +101,13 @@ class ConsumptionNewService:
         
         # Formater pour les charts
         datasets = []
-        color_map = {
-            "Administrative": "blue",
-            "Industrielle": "teal",
-            "Autres": "amber",
-            "Bornes Fontaines": "purple"
-        }
+        color_keys = ["blue", "teal", "amber", "purple", "green", "red"]
         
-        for t in types:
+        for index, t in enumerate(types):
             datasets.append({
                 "label": t,
                 "data": [data_by_type[t][y] for y in years],
-                "colorKey": color_map.get(t, "blue")
+                "colorKey": color_keys[index % len(color_keys)]
             })
         
         return {
@@ -118,13 +135,14 @@ class ConsumptionNewService:
         
         params = {"year": year}
         
-        if region != "all":
+        if region is not None and region != "all":
             query = text("""
                 SELECT 
                     fl.type_consommation,
                     SUM(fl.consommation) as consommation
                 FROM fact_long fl
                 JOIN master_panel mp ON fl.id_centre_desservi = mp.id_centre_desservi
+                    AND fl.annee = mp.annee
                 WHERE mp.code_region_12 = :region
                 AND fl.annee = :year
                 GROUP BY fl.type_consommation
